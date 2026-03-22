@@ -35,7 +35,9 @@ import {
   TerminalSquare,
   SlidersHorizontal,
   Wrench,
-  BookMarked
+  BookMarked,
+  X,
+  Save
 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -82,6 +84,8 @@ interface CommandSuggestion {
   label: string;
   command: string;
 }
+
+type DensityMode = 'comfortable' | 'compact';
 
 interface SystemStats {
   cpu: number;
@@ -229,6 +233,11 @@ export default function CogniraApp() {
   const [commandOutput, setCommandOutput] = useState('');
   const [showUtilityDock, setShowUtilityDock] = useState(false);
   const [utilityTab, setUtilityTab] = useState<'context' | 'tools' | 'sources'>('context');
+  const [showSettingsPanel, setShowSettingsPanel] = useState(false);
+  const [densityMode, setDensityMode] = useState<DensityMode>('comfortable');
+  const [autoOpenDock, setAutoOpenDock] = useState(true);
+  const [showTopThinkingBadge, setShowTopThinkingBadge] = useState(true);
+  const [showSystemHealthCard, setShowSystemHealthCard] = useState(true);
   const [editingMessageIndex, setEditingMessageIndex] = useState<number | null>(null);
   const [editingText, setEditingText] = useState('');
   const [isDraggingFiles, setIsDraggingFiles] = useState(false);
@@ -309,6 +318,10 @@ export default function CogniraApp() {
       const storedReusablePrompt = localStorage.getItem('cognira_reusable_prompt');
       const storedPinned = localStorage.getItem('cognira_pinned_prompts');
       const storedUtilityTab = localStorage.getItem('cognira_utility_tab');
+      const storedDensity = localStorage.getItem('cognira_density_mode');
+      const storedAutoOpenDock = localStorage.getItem('cognira_auto_open_dock');
+      const storedTopThinkingBadge = localStorage.getItem('cognira_show_top_thinking_badge');
+      const storedSystemHealthCard = localStorage.getItem('cognira_show_system_health_card');
       if (storedDevMode !== null) setDevMode(storedDevMode === 'true');
       if (storedWebAssist !== null) setWebAssistMode(storedWebAssist === 'true');
       if (storedConcise !== null) setConciseMode(storedConcise === 'true');
@@ -320,6 +333,10 @@ export default function CogniraApp() {
       if (storedUtilityTab === 'context' || storedUtilityTab === 'tools' || storedUtilityTab === 'sources') {
         setUtilityTab(storedUtilityTab);
       }
+      if (storedDensity === 'compact' || storedDensity === 'comfortable') setDensityMode(storedDensity);
+      if (storedAutoOpenDock !== null) setAutoOpenDock(storedAutoOpenDock === 'true');
+      if (storedTopThinkingBadge !== null) setShowTopThinkingBadge(storedTopThinkingBadge === 'true');
+      if (storedSystemHealthCard !== null) setShowSystemHealthCard(storedSystemHealthCard === 'true');
     } catch (error) {
       console.error('Failed to load mode preferences', error);
     }
@@ -336,16 +353,31 @@ export default function CogniraApp() {
       localStorage.setItem('cognira_reusable_prompt', reusableSystemPrompt);
       localStorage.setItem('cognira_pinned_prompts', JSON.stringify(pinnedPrompts));
       localStorage.setItem('cognira_utility_tab', utilityTab);
+      localStorage.setItem('cognira_density_mode', densityMode);
+      localStorage.setItem('cognira_auto_open_dock', String(autoOpenDock));
+      localStorage.setItem('cognira_show_top_thinking_badge', String(showTopThinkingBadge));
+      localStorage.setItem('cognira_show_system_health_card', String(showSystemHealthCard));
     } catch (error) {
       console.error('Failed to save mode preferences', error);
     }
-  }, [devMode, webAssistMode, conciseMode, performanceMode, personas, selectedPersonaId, reusableSystemPrompt, pinnedPrompts, utilityTab]);
+  }, [devMode, webAssistMode, conciseMode, performanceMode, personas, selectedPersonaId, reusableSystemPrompt, pinnedPrompts, utilityTab, densityMode, autoOpenDock, showTopThinkingBadge, showSystemHealthCard]);
 
   useEffect(() => {
-    if (pinnedPrompts.length > 0 || attachedFiles.length > 0 || citations.length > 0 || commandSuggestions.length > 0 || commandOutput) {
+    if (autoOpenDock && (pinnedPrompts.length > 0 || attachedFiles.length > 0 || citations.length > 0 || commandSuggestions.length > 0 || commandOutput)) {
       setShowUtilityDock(true);
     }
-  }, [pinnedPrompts, attachedFiles, citations, commandSuggestions, commandOutput]);
+  }, [autoOpenDock, pinnedPrompts, attachedFiles, citations, commandSuggestions, commandOutput]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setShowSettingsPanel(false);
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
 
   useEffect(() => {
     try {
@@ -747,6 +779,28 @@ export default function CogniraApp() {
     }
   };
 
+  const resetUiSettings = () => {
+    setDensityMode('comfortable');
+    setAutoOpenDock(true);
+    setShowTopThinkingBadge(true);
+    setShowSystemHealthCard(true);
+    setPerformanceMode(LOW_RESOURCE_MODE);
+  };
+
+  const exportUiSettings = async () => {
+    const payload = {
+      densityMode,
+      autoOpenDock,
+      showTopThinkingBadge,
+      showSystemHealthCard,
+      performanceMode,
+      utilityTab,
+      selectedPersonaId,
+      reusableSystemPrompt
+    };
+    await copyToClipboard(JSON.stringify(payload, null, 2));
+  };
+
   const handleNewChat = () => {
     const newId = `session_${Date.now()}`;
     setSessionId(newId);
@@ -949,6 +1003,7 @@ export default function CogniraApp() {
               </div>
 
               {/* System Stats */}
+              {showSystemHealthCard && (
               <div className="space-y-3 px-2 pt-4 border-t border-[#2a2a2a]/50">
                 <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest flex items-center gap-2">
                   <Activity size={10} /> System Health
@@ -968,6 +1023,7 @@ export default function CogniraApp() {
                   </div>
                 </div>
               </div>
+              )}
             </div>
 
             <div className="p-4 border-t border-[#2a2a2a] flex flex-col gap-3 bg-[#0d0d0d]">
@@ -1001,7 +1057,8 @@ export default function CogniraApp() {
       {/* Main Content */}
       <div className={cn(
         "flex-1 flex flex-col relative bg-[#000000] transition-all duration-300",
-        devMode && "pt-[28px]"
+        devMode && "pt-[28px]",
+        densityMode === 'compact' && 'text-[95%]'
       )}>
         {/* Top Header */}
         <header className="h-14 border-b border-[#2a2a2a] flex items-center justify-between px-6 bg-black/80 backdrop-blur-xl sticky top-0 z-10">
@@ -1019,13 +1076,16 @@ export default function CogniraApp() {
           </div>
           
           <div className="flex items-center gap-4">
-            {isLoading && (
+            {isLoading && showTopThinkingBadge && (
               <div className="flex items-center gap-2 text-[10px] font-mono text-[#ff7a00] animate-pulse">
                 <Activity size={12} />
                 <span>THINKING...</span>
               </div>
             )}
-            <button className="p-2 hover:bg-[#1a1a1a] rounded-md transition-colors text-zinc-500 hover:text-white">
+            <button
+              onClick={() => setShowSettingsPanel(true)}
+              className="p-2 hover:bg-[#1a1a1a] rounded-md transition-colors text-zinc-500 hover:text-white"
+            >
               <Settings size={18} />
             </button>
           </div>
@@ -1033,7 +1093,10 @@ export default function CogniraApp() {
 
         {/* Chat Area */}
         <div className="flex-1 overflow-y-auto scrollbar-hide">
-          <div className="max-w-3xl mx-auto px-6 py-12 space-y-12">
+          <div className={cn(
+            "max-w-3xl mx-auto px-6",
+            densityMode === 'compact' ? 'py-8 space-y-8' : 'py-12 space-y-12'
+          )}>
             {messages.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-[60vh] text-center space-y-8">
                 <motion.div 
@@ -1410,7 +1473,7 @@ export default function CogniraApp() {
                   <Mic size={20} />
                 </button>
                 <button 
-                  onClick={handleSendMessage}
+                  onClick={() => { void handleSendMessage(); }}
                   disabled={!input.trim() || isLoading}
                   className={cn(
                     "p-2.5 rounded-xl transition-all",
@@ -1587,6 +1650,100 @@ export default function CogniraApp() {
             </div>
           </div>
         </div>
+
+        <AnimatePresence>
+          {showSettingsPanel && (
+            <>
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="fixed inset-0 bg-black/55 z-40"
+                onClick={() => setShowSettingsPanel(false)}
+              />
+              <motion.aside
+                initial={{ x: 360, opacity: 0 }}
+                animate={{ x: 0, opacity: 1 }}
+                exit={{ x: 360, opacity: 0 }}
+                transition={{ type: 'spring', stiffness: 260, damping: 26 }}
+                className="fixed top-0 right-0 h-full w-[min(92vw,360px)] z-50 bg-[#0f0f10] border-l border-[#262626] shadow-2xl"
+              >
+                <div className="h-full flex flex-col">
+                  <div className="px-4 py-3 border-b border-[#262626] flex items-center justify-between">
+                    <div>
+                      <div className="text-sm font-semibold text-zinc-100">Settings</div>
+                      <div className="text-[11px] text-zinc-500">Customize your Cognira workspace</div>
+                    </div>
+                    <button
+                      onClick={() => setShowSettingsPanel(false)}
+                      className="p-2 rounded-md text-zinc-400 hover:text-white hover:bg-[#1a1a1a]"
+                    >
+                      <X size={16} />
+                    </button>
+                  </div>
+
+                  <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                    <div className="rounded-xl border border-[#252525] bg-[#121212] p-3 space-y-3">
+                      <div className="text-[11px] uppercase tracking-widest text-zinc-500 font-bold">Layout</div>
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="text-zinc-300">Density</span>
+                          <select
+                            value={densityMode}
+                            onChange={(e) => setDensityMode(e.target.value as DensityMode)}
+                            className="bg-[#0e0e0e] border border-[#2a2a2a] rounded-md px-2 py-1 text-xs text-zinc-200"
+                          >
+                            <option value="comfortable">Comfortable</option>
+                            <option value="compact">Compact</option>
+                          </select>
+                        </div>
+                        <label className="flex items-center justify-between text-sm text-zinc-300">
+                          <span>Auto-open utility dock</span>
+                          <input type="checkbox" checked={autoOpenDock} onChange={(e) => setAutoOpenDock(e.target.checked)} />
+                        </label>
+                        <label className="flex items-center justify-between text-sm text-zinc-300">
+                          <span>Show top thinking badge</span>
+                          <input type="checkbox" checked={showTopThinkingBadge} onChange={(e) => setShowTopThinkingBadge(e.target.checked)} />
+                        </label>
+                        <label className="flex items-center justify-between text-sm text-zinc-300">
+                          <span>Show system health card</span>
+                          <input type="checkbox" checked={showSystemHealthCard} onChange={(e) => setShowSystemHealthCard(e.target.checked)} />
+                        </label>
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl border border-[#252525] bg-[#121212] p-3 space-y-3">
+                      <div className="text-[11px] uppercase tracking-widest text-zinc-500 font-bold">Behavior</div>
+                      <label className="flex items-center justify-between text-sm text-zinc-300">
+                        <span>Performance mode</span>
+                        <input type="checkbox" checked={performanceMode} onChange={(e) => setPerformanceMode(e.target.checked)} />
+                      </label>
+                      <div className="text-[11px] text-zinc-500">Performance mode reduces rendering work and polling frequency.</div>
+                    </div>
+
+                    <div className="rounded-xl border border-[#252525] bg-[#121212] p-3 space-y-3">
+                      <div className="text-[11px] uppercase tracking-widest text-zinc-500 font-bold">Data</div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={exportUiSettings}
+                          className="px-3 py-1.5 rounded-lg bg-[#171717] border border-[#2a2a2a] text-zinc-200 text-xs inline-flex items-center gap-1.5 hover:bg-[#1e1e1e]"
+                        >
+                          <Save size={13} /> Copy settings JSON
+                        </button>
+                        <button
+                          onClick={resetUiSettings}
+                          className="px-3 py-1.5 rounded-lg bg-[#171717] border border-[#2a2a2a] text-zinc-200 text-xs hover:bg-[#1e1e1e]"
+                        >
+                          Reset UI defaults
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </motion.aside>
+            </>
+          )}
+        </AnimatePresence>
       </div>
     </div>
   );

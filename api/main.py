@@ -183,6 +183,15 @@ def init_db():
             keywords TEXT
         )
     """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS file_chunks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            filename TEXT,
+            chunk_index INTEGER,
+            content TEXT
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_file_chunks_filename ON file_chunks(filename)")
     
     # Check if we need to migrate existing data from messages to sessions
     cursor.execute("SELECT DISTINCT session_id FROM messages")
@@ -259,6 +268,10 @@ class ChatRequest(BaseModel):
     messages: List[Message]
     stream: Optional[bool] = True
     session_id: Optional[str] = "default"
+
+
+class CommandSuggestionRequest(BaseModel):
+    query: str
 
 @app.get("/history/{session_id}")
 async def get_chat_history(session_id: str):
@@ -519,6 +532,17 @@ async def upload_file(file: UploadFile = File(...)):
         cursor = conn.cursor()
         cursor.execute("REPLACE INTO file_index (filename, content_preview, keywords) VALUES (?, ?, ?)", 
                        (file.filename, preview, common_words))
+        cursor.execute("DELETE FROM file_chunks WHERE filename = ?", (file.filename,))
+
+        chunk_size = 650
+        chunks = [text_content[i:i + chunk_size] for i in range(0, len(text_content), chunk_size)]
+        for idx, chunk in enumerate(chunks):
+            if chunk.strip():
+                cursor.execute(
+                    "INSERT INTO file_chunks (filename, chunk_index, content) VALUES (?, ?, ?)",
+                    (file.filename, idx, chunk)
+                )
+
         conn.commit()
         conn.close()
     except Exception as e:
@@ -536,8 +560,23 @@ async def search_files(q: str):
                    (query, query, query))
     rows = cursor.fetchall()
     results = [{"filename": row[0], "preview": row[1]} for row in rows]
+
+    cursor.execute(
+        "SELECT filename, chunk_index, content FROM file_chunks WHERE LOWER(content) LIKE ? LIMIT 8",
+        (query,)
+    )
+    chunk_rows = cursor.fetchall()
+    citations = [
+        {
+            "filename": row[0],
+            "chunk": row[1],
+            "snippet": row[2][:260] + ("..." if len(row[2]) > 260 else "")
+        }
+        for row in chunk_rows
+    ]
+
     conn.close()
-    return {"results": results}
+    return {"results": results, "citations": citations}
 
 @app.get("/files/list")
 async def list_files():
@@ -565,6 +604,43 @@ async def system_tool(command: str):
         return {"stdout": result.stdout, "stderr": result.stderr}
     except Exception as e:
         return {"error": str(e)}
+
+
+@app.post("/tools/suggest-command")
+async def suggest_command(request: CommandSuggestionRequest):
+    prompt = (request.query or "").strip().lower()
+    suggestions = []
+
+    if not prompt:
+        return {"suggestions": []}
+
+    if "install" in prompt or "dependency" in prompt:
+        suggestions.extend([
+            {"label": "Install npm dependencies", "command": "npm install"},
+            {"label": "Install Python dependencies", "command": "venv\\Scripts\\pip install -r api\\requirements.txt"}
+        ])
+    if "run" in prompt or "start" in prompt or "dev" in prompt:
+        suggestions.extend([
+            {"label": "Start backend", "command": "npm run dev:lite"},
+            {"label": "Start frontend (lite)", "command": "npm run dev:ui:lite"}
+        ])
+    if "test" in prompt:
+        suggestions.extend([
+            {"label": "Run frontend lint", "command": "npm run lint"},
+            {"label": "Syntax check backend", "command": "venv\\Scripts\\python -m py_compile api\\main.py"}
+        ])
+    if "port" in prompt or "address in use" in prompt:
+        suggestions.append(
+            {"label": "See listeners on 3000/8000", "command": "Get-NetTCPConnection -LocalPort 3000,8000 -State Listen"}
+        )
+
+    if not suggestions:
+        suggestions = [
+            {"label": "Show project files", "command": "Get-ChildItem"},
+            {"label": "Check backend health", "command": "Invoke-WebRequest -Uri http://localhost:8000/health -UseBasicParsing"}
+        ]
+
+    return {"suggestions": suggestions[:6]}
 
 if __name__ == "__main__":
     import uvicorn

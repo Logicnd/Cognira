@@ -22,11 +22,20 @@ import {
   Sparkles,
   Check,
   Paperclip,
-  Image,
+  Image as ImageIcon,
   FlaskConical,
   ShoppingBag,
   Search,
-  Ellipsis
+  Ellipsis,
+  Pin,
+  RotateCcw,
+  Pencil,
+  Upload,
+  Gauge,
+  TerminalSquare,
+  SlidersHorizontal,
+  Wrench,
+  BookMarked
 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -52,6 +61,28 @@ interface ApiMessage {
   content: string;
 }
 
+interface Persona {
+  id: string;
+  name: string;
+  prompt: string;
+}
+
+interface UploadedFileItem {
+  filename: string;
+  path?: string;
+}
+
+interface CitationItem {
+  filename: string;
+  chunk: number;
+  snippet: string;
+}
+
+interface CommandSuggestion {
+  label: string;
+  command: string;
+}
+
 interface SystemStats {
   cpu: number;
   memory: number;
@@ -73,6 +104,7 @@ interface StreamChunk {
     role?: Message['role'];
     content?: string;
   };
+  citations?: CitationItem[];
 }
 
 interface BrowserSpeechRecognitionEvent {
@@ -102,6 +134,30 @@ declare global {
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 const LOW_RESOURCE_MODE = process.env.NEXT_PUBLIC_LOW_RESOURCE_MODE === 'true';
+const DEFAULT_PERSONAS: Persona[] = [
+  {
+    id: 'balanced',
+    name: 'Balanced',
+    prompt: 'You are a balanced assistant. Be accurate, clear, and practical.'
+  },
+  {
+    id: 'developer',
+    name: 'Developer',
+    prompt: 'You are a senior software engineer assistant. Prefer concrete implementation guidance and concise examples.'
+  },
+  {
+    id: 'teacher',
+    name: 'Teacher',
+    prompt: 'You are an instructional assistant. Explain clearly and step-by-step.'
+  }
+];
+
+const DEFAULT_PINNED_PROMPTS = [
+  'Summarize this chat in 5 bullets',
+  'Suggest next development steps',
+  'Generate tests for the last code block',
+  'Find likely performance bottlenecks'
+];
 const syntaxTheme: Record<string, CSSProperties> = vscDarkPlus;
 const markdownComponents: Components = {
   code({ className, children }) {
@@ -158,13 +214,29 @@ export default function CogniraApp() {
   const [showModeMenu, setShowModeMenu] = useState(false);
   const [webAssistMode, setWebAssistMode] = useState(false);
   const [conciseMode, setConciseMode] = useState(false);
+  const [performanceMode, setPerformanceMode] = useState(LOW_RESOURCE_MODE);
   const [thinkingStatus, setThinkingStatus] = useState('Thinking...');
+  const [thinkingPhase, setThinkingPhase] = useState('init');
   const [thinkingSeconds, setThinkingSeconds] = useState(0);
   const [hasReceivedContent, setHasReceivedContent] = useState(false);
+  const [personas, setPersonas] = useState<Persona[]>(DEFAULT_PERSONAS);
+  const [selectedPersonaId, setSelectedPersonaId] = useState('balanced');
+  const [reusableSystemPrompt, setReusableSystemPrompt] = useState('');
+  const [pinnedPrompts, setPinnedPrompts] = useState<string[]>(DEFAULT_PINNED_PROMPTS);
+  const [attachedFiles, setAttachedFiles] = useState<UploadedFileItem[]>([]);
+  const [citations, setCitations] = useState<CitationItem[]>([]);
+  const [commandSuggestions, setCommandSuggestions] = useState<CommandSuggestion[]>([]);
+  const [commandOutput, setCommandOutput] = useState('');
+  const [showUtilityDock, setShowUtilityDock] = useState(false);
+  const [utilityTab, setUtilityTab] = useState<'context' | 'tools' | 'sources'>('context');
+  const [editingMessageIndex, setEditingMessageIndex] = useState<number | null>(null);
+  const [editingText, setEditingText] = useState('');
+  const [isDraggingFiles, setIsDraggingFiles] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<BrowserSpeechRecognition | null>(null);
   const modeMenuRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleQuickAction = (action: 'files' | 'image' | 'research' | 'shopping' | 'web' | 'more') => {
     const quickPrompts: Record<typeof action, string> = {
@@ -231,9 +303,23 @@ export default function CogniraApp() {
       const storedDevMode = localStorage.getItem('cognira_mode_dev');
       const storedWebAssist = localStorage.getItem('cognira_mode_web');
       const storedConcise = localStorage.getItem('cognira_mode_concise');
+      const storedPerformance = localStorage.getItem('cognira_mode_perf');
+      const storedPersonas = localStorage.getItem('cognira_personas');
+      const storedPersonaId = localStorage.getItem('cognira_persona_selected');
+      const storedReusablePrompt = localStorage.getItem('cognira_reusable_prompt');
+      const storedPinned = localStorage.getItem('cognira_pinned_prompts');
+      const storedUtilityTab = localStorage.getItem('cognira_utility_tab');
       if (storedDevMode !== null) setDevMode(storedDevMode === 'true');
       if (storedWebAssist !== null) setWebAssistMode(storedWebAssist === 'true');
       if (storedConcise !== null) setConciseMode(storedConcise === 'true');
+      if (storedPerformance !== null) setPerformanceMode(storedPerformance === 'true');
+      if (storedPersonas) setPersonas(JSON.parse(storedPersonas) as Persona[]);
+      if (storedPersonaId) setSelectedPersonaId(storedPersonaId);
+      if (storedReusablePrompt) setReusableSystemPrompt(storedReusablePrompt);
+      if (storedPinned) setPinnedPrompts(JSON.parse(storedPinned) as string[]);
+      if (storedUtilityTab === 'context' || storedUtilityTab === 'tools' || storedUtilityTab === 'sources') {
+        setUtilityTab(storedUtilityTab);
+      }
     } catch (error) {
       console.error('Failed to load mode preferences', error);
     }
@@ -244,10 +330,56 @@ export default function CogniraApp() {
       localStorage.setItem('cognira_mode_dev', String(devMode));
       localStorage.setItem('cognira_mode_web', String(webAssistMode));
       localStorage.setItem('cognira_mode_concise', String(conciseMode));
+      localStorage.setItem('cognira_mode_perf', String(performanceMode));
+      localStorage.setItem('cognira_personas', JSON.stringify(personas));
+      localStorage.setItem('cognira_persona_selected', selectedPersonaId);
+      localStorage.setItem('cognira_reusable_prompt', reusableSystemPrompt);
+      localStorage.setItem('cognira_pinned_prompts', JSON.stringify(pinnedPrompts));
+      localStorage.setItem('cognira_utility_tab', utilityTab);
     } catch (error) {
       console.error('Failed to save mode preferences', error);
     }
-  }, [devMode, webAssistMode, conciseMode]);
+  }, [devMode, webAssistMode, conciseMode, performanceMode, personas, selectedPersonaId, reusableSystemPrompt, pinnedPrompts, utilityTab]);
+
+  useEffect(() => {
+    if (pinnedPrompts.length > 0 || attachedFiles.length > 0 || citations.length > 0 || commandSuggestions.length > 0 || commandOutput) {
+      setShowUtilityDock(true);
+    }
+  }, [pinnedPrompts, attachedFiles, citations, commandSuggestions, commandOutput]);
+
+  useEffect(() => {
+    try {
+      const rawPresets = localStorage.getItem('cognira_session_presets');
+      const presets = rawPresets ? JSON.parse(rawPresets) as Record<string, { dev: boolean; web: boolean; concise: boolean; perf: boolean; personaId: string }> : {};
+      const preset = presets[sessionId];
+      if (preset) {
+        setDevMode(preset.dev);
+        setWebAssistMode(preset.web);
+        setConciseMode(preset.concise);
+        setPerformanceMode(preset.perf);
+        setSelectedPersonaId(preset.personaId || 'balanced');
+      }
+    } catch (error) {
+      console.error('Failed to load session presets', error);
+    }
+  }, [sessionId]);
+
+  useEffect(() => {
+    try {
+      const rawPresets = localStorage.getItem('cognira_session_presets');
+      const presets = rawPresets ? JSON.parse(rawPresets) as Record<string, { dev: boolean; web: boolean; concise: boolean; perf: boolean; personaId: string }> : {};
+      presets[sessionId] = {
+        dev: devMode,
+        web: webAssistMode,
+        concise: conciseMode,
+        perf: performanceMode,
+        personaId: selectedPersonaId
+      };
+      localStorage.setItem('cognira_session_presets', JSON.stringify(presets));
+    } catch (error) {
+      console.error('Failed to save session presets', error);
+    }
+  }, [sessionId, devMode, webAssistMode, conciseMode, performanceMode, selectedPersonaId]);
 
   useEffect(() => {
     if (!isLoading) {
@@ -282,9 +414,9 @@ export default function CogniraApp() {
     };
 
     fetchStats();
-    const interval = setInterval(fetchStats, LOW_RESOURCE_MODE ? 20000 : 5000);
+    const interval = setInterval(fetchStats, performanceMode ? 30000 : 5000);
     return () => clearInterval(interval);
-  }, []);
+  }, [performanceMode]);
 
   // Fetch available models
   useEffect(() => {
@@ -333,14 +465,17 @@ export default function CogniraApp() {
     fetchSessions();
   }, [sessionId]);
 
-  const handleSendMessage = async () => {
-    if (!input.trim() || isLoading) return;
+  const handleSendMessage = async (overrideInput?: string, baseMessages?: Message[]) => {
+    if (isLoading) return;
 
-    const trimmedInput = input.trim();
+    const trimmedInput = (overrideInput ?? input).trim();
+    if (!trimmedInput) return;
     const userMessage: Message = { role: 'user', content: trimmedInput };
     const assistantMessage: Message = { role: 'assistant', content: '' };
-    const nextMessages = [...messages, userMessage];
+    const sourceMessages = baseMessages ?? messages;
+    const nextMessages = [...sourceMessages, userMessage];
     const modeInstructions: string[] = [];
+    const selectedPersona = personas.find((p) => p.id === selectedPersonaId);
 
     if (devMode) {
       modeInstructions.push('Developer mode is enabled. Prefer technical, implementation-focused, and explicit reasoning when useful.');
@@ -351,19 +486,51 @@ export default function CogniraApp() {
     if (webAssistMode) {
       modeInstructions.push('If cloud LLM is unavailable, provide the best possible web-assisted answer with clear source links.');
     }
+    if (selectedPersona?.prompt) {
+      modeInstructions.push(selectedPersona.prompt);
+    }
+    if (reusableSystemPrompt.trim()) {
+      modeInstructions.push(reusableSystemPrompt.trim());
+    }
+
+    let requestCitations: CitationItem[] = [];
+    if (attachedFiles.length > 0) {
+      try {
+        const fileSearch = await axios.get(`${API_URL}/files/search`, { params: { q: trimmedInput } });
+        requestCitations = (fileSearch.data?.citations || []) as CitationItem[];
+        if (requestCitations.length > 0) {
+          const citationContext = requestCitations
+            .slice(0, 4)
+            .map((c, idx) => `${idx + 1}) ${c.filename} [chunk ${c.chunk}] ${c.snippet}`)
+            .join('\n');
+          modeInstructions.push(`Use attached file context when relevant:\n${citationContext}`);
+        }
+      } catch (error) {
+        console.error('Failed to query file citations', error);
+      }
+    }
 
     const apiMessages: ApiMessage[] = modeInstructions.length > 0
       ? [{ role: 'system', content: modeInstructions.join(' ') }, ...nextMessages]
       : nextMessages;
 
-    setMessages(prev => [...prev, userMessage, assistantMessage]);
+    setMessages([...sourceMessages, userMessage, assistantMessage]);
     setInput('');
     setIsLoading(true);
     setHasReceivedContent(false);
     setThinkingStatus('Thinking...');
+    setThinkingPhase('init');
     setThinkingSeconds(0);
+    setCitations(requestCitations);
 
     try {
+      try {
+        const suggestionResponse = await axios.post(`${API_URL}/tools/suggest-command`, { query: trimmedInput });
+        setCommandSuggestions((suggestionResponse.data?.suggestions || []) as CommandSuggestion[]);
+      } catch (suggestError) {
+        console.error('Failed to get command suggestions', suggestError);
+      }
+
       const response = await fetch(`${API_URL}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -430,6 +597,13 @@ export default function CogniraApp() {
         if (data.status) {
           setThinkingStatus(data.status);
         }
+        if (data.phase) {
+          setThinkingPhase(data.phase);
+        }
+
+        if (data.citations && data.citations.length > 0) {
+          setCitations(data.citations);
+        }
 
         const content = data.message?.content ?? data.content ?? '';
         if (content) {
@@ -482,7 +656,10 @@ export default function CogniraApp() {
     } finally {
       setIsLoading(false);
       setThinkingStatus('Thinking...');
+      setThinkingPhase('init');
       setThinkingSeconds(0);
+      setEditingMessageIndex(null);
+      setEditingText('');
       // Refresh session titles
       try {
         const response = await axios.get(`${API_URL}/sessions`);
@@ -490,6 +667,83 @@ export default function CogniraApp() {
       } catch (e) {
         console.error("Failed to refresh sessions", e);
       }
+    }
+  };
+
+  const handleRegenerateResponse = async () => {
+    if (isLoading) {
+      return;
+    }
+
+    const lastUserIndex = [...messages].map((m, i) => ({ ...m, i })).reverse().find((m) => m.role === 'user')?.i;
+    if (lastUserIndex === undefined) {
+      return;
+    }
+
+    const base = messages.slice(0, lastUserIndex);
+    const lastUserPrompt = messages[lastUserIndex]?.content || '';
+    await handleSendMessage(lastUserPrompt, base);
+  };
+
+  const startEditingMessage = (index: number, content: string) => {
+    setEditingMessageIndex(index);
+    setEditingText(content);
+  };
+
+  const applyEditedMessage = async () => {
+    if (editingMessageIndex === null) {
+      return;
+    }
+    const base = messages.slice(0, editingMessageIndex);
+    await handleSendMessage(editingText, base);
+  };
+
+  const pinCurrentPrompt = () => {
+    const cleaned = input.trim();
+    if (!cleaned) {
+      return;
+    }
+    if (pinnedPrompts.includes(cleaned)) {
+      return;
+    }
+    setPinnedPrompts((prev) => [cleaned, ...prev].slice(0, 10));
+  };
+
+  const handleFileUpload = async (files: FileList | null) => {
+    if (!files || files.length === 0) {
+      return;
+    }
+
+    const uploaded: UploadedFileItem[] = [];
+    for (const file of Array.from(files)) {
+      try {
+        const formData = new FormData();
+        formData.append('file', file);
+        const response = await axios.post(`${API_URL}/files/upload`, formData, {
+          headers: { 'Content-Type': 'multipart/form-data' }
+        });
+        uploaded.push(response.data as UploadedFileItem);
+      } catch (error) {
+        console.error('Failed to upload file', error);
+      }
+    }
+
+    if (uploaded.length > 0) {
+      setAttachedFiles((prev) => [...uploaded, ...prev]);
+    }
+  };
+
+  const runSuggestedCommand = async (command: string) => {
+    try {
+      const response = await axios.post(`${API_URL}/tools/system`, null, {
+        params: { command }
+      });
+      const stdout = response.data?.stdout || '';
+      const stderr = response.data?.stderr || '';
+      setCommandOutput([stdout, stderr].filter(Boolean).join('\n').trim() || 'Command completed with no output.');
+    } catch (error) {
+      console.error('Failed to run suggested command', error);
+      setCommandOutput('Command failed to execute.');
     }
   };
 
@@ -555,6 +809,24 @@ export default function CogniraApp() {
     }
   };
 
+  const extractRunnableCommands = (content: string): string[] => {
+    const commands: string[] = [];
+    const blockRegex = /```(?:bash|sh|powershell|pwsh|cmd)?\n([\s\S]*?)```/g;
+    let match: RegExpExecArray | null;
+    while ((match = blockRegex.exec(content)) !== null) {
+      const candidate = match[1].trim();
+      if (candidate && candidate.length < 400) {
+        commands.push(candidate);
+      }
+    }
+    return commands.slice(0, 2);
+  };
+
+  const renderedMessages = performanceMode && messages.length > 80
+    ? messages.slice(-80)
+    : messages;
+  const renderedOffset = messages.length - renderedMessages.length;
+
   return (
     <div className="flex h-screen bg-[#000000] text-zinc-100 font-sans overflow-hidden">
       <Head>
@@ -597,12 +869,16 @@ export default function CogniraApp() {
                 </div>
                 <h1 className="text-sm font-bold tracking-tight">Cognira</h1>
               </div>
-              <button 
+            </div>
+
+            <div className="p-3 border-b border-[#2a2a2a] bg-[#101010]">
+              <button
                 onClick={handleNewChat}
-                className="p-2 hover:bg-[#1a1a1a] rounded-md transition-colors text-zinc-500 hover:text-white"
-                title="New Chat"
+                className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg border border-[#2a2a2a] bg-[#151515] text-zinc-200 hover:bg-[#1a1a1a] hover:border-zinc-600 transition-colors text-sm font-medium"
+                title="New chat"
               >
-                <Plus size={16} />
+                <Plus size={14} />
+                New chat
               </button>
             </div>
 
@@ -793,11 +1069,13 @@ export default function CogniraApp() {
                 </div>
               </div>
             ) : (
-              messages.map((msg, i) => (
+              renderedMessages.map((msg, i) => {
+                const globalIndex = renderedOffset + i;
+                return (
                 <motion.div 
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  key={i} 
+                  initial={performanceMode ? false : { opacity: 0, y: 10 }}
+                  animate={performanceMode ? { opacity: 1, y: 0 } : { opacity: 1, y: 0 }}
+                  key={globalIndex} 
                   className={cn(
                     "flex gap-6 group",
                     msg.role === 'user' ? "flex-row-reverse" : "flex-row"
@@ -825,14 +1103,36 @@ export default function CogniraApp() {
                       {msg.content ? (
                         <ReactMarkdown 
                           remarkPlugins={[remarkGfm]}
-                          components={markdownComponents}
+                          components={performanceMode ? undefined : markdownComponents}
                         >
                           {msg.content}
                         </ReactMarkdown>
-                      ) : (isLoading && i === messages.length - 1 ? (
+                      ) : (isLoading && globalIndex === messages.length - 1 ? (
                         <div className="space-y-2">
                           <div className="text-xs text-zinc-500 font-medium">{thinkingLabel}</div>
                           <div className="text-sm text-zinc-300">{thinkingStatus}</div>
+                          <div className="flex flex-wrap gap-1.5">
+                            {[
+                              { key: 'init', label: 'Init' },
+                              { key: 'cloud', label: 'Cloud' },
+                              { key: 'cloud-attempt', label: 'Attempt' },
+                              { key: 'local-fallback', label: 'Fallback' },
+                              { key: 'local-chat', label: 'Local' },
+                              { key: 'web-fallback', label: 'Web' }
+                            ].map((phase) => (
+                              <span
+                                key={phase.key}
+                                className={cn(
+                                  'px-2 py-0.5 rounded-full text-[10px] border',
+                                  thinkingPhase === phase.key
+                                    ? 'text-[#ffb066] border-[#ff7a00]/40 bg-[#ff7a00]/10'
+                                    : 'text-zinc-500 border-[#2a2a2a] bg-[#0f0f0f]'
+                                )}
+                              >
+                                {phase.label}
+                              </span>
+                            ))}
+                          </div>
                           <div className="flex gap-1.5 items-center h-4">
                             <div className="w-1.5 h-1.5 bg-[#ff7a00] rounded-full animate-bounce [animation-delay:-0.3s]" />
                             <div className="w-1.5 h-1.5 bg-[#ff7a00] rounded-full animate-bounce [animation-delay:-0.15s]" />
@@ -843,32 +1143,109 @@ export default function CogniraApp() {
                           )}
                         </div>
                       ) : null)}
+
+                      {msg.content.includes('```diff') && (
+                        <div className="mt-3 p-3 rounded-xl bg-[#0f0f0f] border border-[#2a2a2a]">
+                          <div className="text-[10px] uppercase tracking-widest text-zinc-500 mb-2">Diff Preview</div>
+                          <pre className="text-xs text-zinc-300 whitespace-pre-wrap">{msg.content}</pre>
+                        </div>
+                      )}
                     </div>
-                    {msg.role === 'assistant' && msg.content && (
+                    {msg.content && (
                       <div className="flex items-center gap-3 mt-4 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button 
-                          onClick={() => copyToClipboard(msg.content)}
-                          className="text-[10px] font-bold text-zinc-600 hover:text-zinc-400 uppercase tracking-widest flex items-center gap-1.5 transition-colors"
-                        >
+                        <button onClick={() => copyToClipboard(msg.content)} className="text-[10px] font-bold text-zinc-600 hover:text-zinc-400 uppercase tracking-widest flex items-center gap-1.5 transition-colors">
                           <Download size={12} /> Copy
                         </button>
+                        {msg.role === 'user' && (
+                          <button
+                            onClick={() => startEditingMessage(globalIndex, msg.content)}
+                            className="text-[10px] font-bold text-zinc-600 hover:text-zinc-400 uppercase tracking-widest flex items-center gap-1.5 transition-colors"
+                          >
+                            <Pencil size={12} /> Edit & Retry
+                          </button>
+                        )}
+                        {msg.role === 'assistant' && globalIndex === messages.length - 1 && (
+                          <button
+                            onClick={handleRegenerateResponse}
+                            className="text-[10px] font-bold text-zinc-600 hover:text-zinc-400 uppercase tracking-widest flex items-center gap-1.5 transition-colors"
+                          >
+                            <RotateCcw size={12} /> Regenerate
+                          </button>
+                        )}
+                        {msg.role === 'assistant' && extractRunnableCommands(msg.content).map((command) => (
+                          <button
+                            key={command}
+                            onClick={() => runSuggestedCommand(command)}
+                            className="text-[10px] font-bold text-zinc-600 hover:text-zinc-400 uppercase tracking-widest flex items-center gap-1.5 transition-colors"
+                          >
+                            <TerminalSquare size={12} /> Run Snippet
+                          </button>
+                        ))}
                       </div>
                     )}
                   </div>
                 </motion.div>
-              ))
+              );
+            })
             )}
             <div ref={messagesEndRef} />
           </div>
         </div>
 
+        {editingMessageIndex !== null && (
+          <div className="px-4 sm:px-8 pb-2">
+            <div className="max-w-3xl mx-auto bg-[#101010] border border-[#2a2a2a] rounded-xl p-3 space-y-2">
+              <div className="text-[10px] uppercase tracking-widest text-zinc-500">Editing message and retrying from this point</div>
+              <textarea
+                value={editingText}
+                onChange={(e) => setEditingText(e.target.value)}
+                className="w-full min-h-[80px] bg-black/40 border border-[#2a2a2a] rounded-lg p-3 text-sm text-zinc-200"
+              />
+              <div className="flex items-center gap-2">
+                <button onClick={applyEditedMessage} className="px-3 py-1.5 rounded-lg bg-[#ff7a00] text-black text-xs font-semibold">Apply & Retry</button>
+                <button onClick={() => { setEditingMessageIndex(null); setEditingText(''); }} className="px-3 py-1.5 rounded-lg bg-[#1a1a1a] text-zinc-300 text-xs border border-[#2a2a2a]">Cancel</button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Input Bar */}
-        <div className="p-8 bg-gradient-to-t from-black via-black to-transparent">
-          <div className="max-w-3xl mx-auto relative">
+        <div className="p-4 sm:p-8 bg-gradient-to-t from-black via-black to-transparent">
+          <div
+            className="max-w-3xl mx-auto relative"
+            onDragOver={(e) => {
+              e.preventDefault();
+              setIsDraggingFiles(true);
+            }}
+            onDragLeave={(e) => {
+              e.preventDefault();
+              setIsDraggingFiles(false);
+            }}
+            onDrop={async (e) => {
+              e.preventDefault();
+              setIsDraggingFiles(false);
+              await handleFileUpload(e.dataTransfer.files);
+            }}
+          >
+            {isDraggingFiles && (
+              <div className="absolute inset-0 z-30 rounded-2xl border border-dashed border-[#ff7a00]/60 bg-[#ff7a00]/10 flex items-center justify-center text-sm text-[#ffb066] font-semibold">
+                Drop files to attach for context
+              </div>
+            )}
             <div className={cn(
               "relative group bg-[#111111] border rounded-2xl transition-all duration-300",
               devMode ? "border-[#ff7a00]/30 focus-within:border-[#ff7a00] focus-within:ring-4 focus-within:ring-[#ff7a00]/5" : "border-[#2a2a2a] focus-within:border-zinc-700 focus-within:ring-4 focus-within:ring-white/5"
             )}>
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                className="hidden"
+                onChange={async (e) => {
+                  await handleFileUpload(e.target.files);
+                  e.target.value = '';
+                }}
+              />
               <div ref={modeMenuRef} className="absolute left-3 bottom-3 z-20">
                 <button
                   onClick={() => setShowModeMenu(prev => !prev)}
@@ -903,7 +1280,7 @@ export default function CogniraApp() {
                           onClick={() => handleQuickAction('image')}
                           className="w-full px-3 py-2.5 rounded-lg text-left hover:bg-[#1b1b1b] transition-colors flex items-center gap-2.5 text-[13px] text-zinc-200"
                         >
-                          <Image size={14} className="text-zinc-400" />
+                          <ImageIcon size={14} className="text-zinc-400" />
                           <span>Create image</span>
                         </button>
                         <button
@@ -966,6 +1343,15 @@ export default function CogniraApp() {
                         <span className="flex items-center gap-2 text-zinc-200"><Sparkles size={14} /> Concise replies</span>
                         {conciseMode && <Check size={14} className="text-[#60a5fa]" />}
                       </button>
+                      <button
+                        onClick={() => {
+                          setPerformanceMode(v => !v);
+                        }}
+                        className="w-full px-4 py-2.5 text-left hover:bg-[#1a1a1a] transition-colors flex items-center justify-between text-sm"
+                      >
+                        <span className="flex items-center gap-2 text-zinc-200"><Gauge size={14} /> Performance mode</span>
+                        {performanceMode && <Check size={14} className="text-amber-400" />}
+                      </button>
                       <div className="h-px bg-[#2a2a2a]" />
                       <button
                         onClick={() => {
@@ -999,6 +1385,20 @@ export default function CogniraApp() {
                 rows={1}
               />
               <div className="absolute right-3 bottom-3 flex items-center gap-2">
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="p-2.5 rounded-xl transition-all text-zinc-600 hover:text-white hover:bg-white/5"
+                  title="Attach files"
+                >
+                  <Upload size={20} />
+                </button>
+                <button
+                  onClick={pinCurrentPrompt}
+                  className="p-2.5 rounded-xl transition-all text-zinc-600 hover:text-white hover:bg-white/5"
+                  title="Pin this prompt"
+                >
+                  <Pin size={20} />
+                </button>
                 <button 
                   onClick={toggleVoiceInput}
                   className={cn(
@@ -1024,6 +1424,7 @@ export default function CogniraApp() {
               </div>
             </div>
             <div className="mt-2 h-5 flex items-center justify-start gap-2 px-2">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">{personas.find(p => p.id === selectedPersonaId)?.name || 'Balanced'}</span>
               {devMode && (
                 <span className="text-[10px] font-bold uppercase tracking-widest text-[#ff7a00]">Developer mode</span>
               )}
@@ -1033,7 +1434,143 @@ export default function CogniraApp() {
               {conciseMode && (
                 <span className="text-[10px] font-bold uppercase tracking-widest text-sky-400">Concise</span>
               )}
+              {performanceMode && (
+                <span className="text-[10px] font-bold uppercase tracking-widest text-amber-400">Performance</span>
+              )}
             </div>
+
+            <div className="mt-2 space-y-2">
+              <div className="flex items-center justify-between">
+                <button
+                  onClick={() => setShowUtilityDock((v) => !v)}
+                  className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md border border-[#2a2a2a] bg-[#101010] text-zinc-400 hover:text-zinc-200 text-[10px] uppercase tracking-widest"
+                >
+                  <SlidersHorizontal size={12} /> Utility Dock
+                </button>
+                <div className="text-[10px] text-zinc-600 uppercase tracking-widest">
+                  {showUtilityDock ? 'Expanded' : 'Collapsed'}
+                </div>
+              </div>
+
+              {showUtilityDock && (
+                <div className="rounded-xl border border-[#2a2a2a] bg-[#0f0f0f] p-2 sm:p-3 space-y-2">
+                  <div className="grid grid-cols-3 gap-1">
+                    <button
+                      onClick={() => setUtilityTab('context')}
+                      className={cn(
+                        'py-1.5 rounded-md text-[10px] uppercase tracking-widest border transition-colors',
+                        utilityTab === 'context' ? 'border-[#3a3a3a] bg-[#181818] text-zinc-200' : 'border-[#2a2a2a] text-zinc-500'
+                      )}
+                    >
+                      Context
+                    </button>
+                    <button
+                      onClick={() => setUtilityTab('tools')}
+                      className={cn(
+                        'py-1.5 rounded-md text-[10px] uppercase tracking-widest border transition-colors flex items-center justify-center gap-1',
+                        utilityTab === 'tools' ? 'border-[#3a3a3a] bg-[#181818] text-zinc-200' : 'border-[#2a2a2a] text-zinc-500'
+                      )}
+                    >
+                      <Wrench size={11} /> Tools
+                    </button>
+                    <button
+                      onClick={() => setUtilityTab('sources')}
+                      className={cn(
+                        'py-1.5 rounded-md text-[10px] uppercase tracking-widest border transition-colors flex items-center justify-center gap-1',
+                        utilityTab === 'sources' ? 'border-[#3a3a3a] bg-[#181818] text-zinc-200' : 'border-[#2a2a2a] text-zinc-500'
+                      )}
+                    >
+                      <BookMarked size={11} /> Sources
+                    </button>
+                  </div>
+
+                  {utilityTab === 'context' && (
+                    <div className="space-y-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <select
+                          value={selectedPersonaId}
+                          onChange={(e) => setSelectedPersonaId(e.target.value)}
+                          className="bg-[#111111] border border-[#2a2a2a] rounded-lg px-2 py-1 text-[11px] text-zinc-300"
+                        >
+                          {personas.map((persona) => (
+                            <option key={persona.id} value={persona.id}>{persona.name}</option>
+                          ))}
+                        </select>
+                        <input
+                          value={reusableSystemPrompt}
+                          onChange={(e) => setReusableSystemPrompt(e.target.value)}
+                          placeholder="Reusable system prompt"
+                          className="flex-1 min-w-[180px] bg-[#111111] border border-[#2a2a2a] rounded-lg px-3 py-1.5 text-[11px] text-zinc-300 placeholder-zinc-600"
+                        />
+                      </div>
+                      {pinnedPrompts.length > 0 && (
+                        <div className="flex flex-wrap gap-2">
+                          {pinnedPrompts.slice(0, 6).map((prompt) => (
+                            <button
+                              key={prompt}
+                              onClick={() => setInput(prompt)}
+                              className="px-2.5 py-1 rounded-full text-[10px] bg-[#111111] border border-[#2a2a2a] text-zinc-400 hover:text-white hover:border-zinc-600"
+                            >
+                              {prompt.length > 45 ? `${prompt.slice(0, 45)}...` : prompt}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {utilityTab === 'tools' && (
+                    <div className="space-y-2">
+                      {commandSuggestions.length > 0 ? (
+                        <div className="flex flex-wrap gap-2">
+                          {commandSuggestions.slice(0, 4).map((suggestion) => (
+                            <button
+                              key={suggestion.command}
+                              onClick={() => runSuggestedCommand(suggestion.command)}
+                              className="px-2 py-1 rounded-md text-[10px] bg-[#101010] border border-[#2a2a2a] text-zinc-300 hover:bg-[#1a1a1a] flex items-center gap-1"
+                            >
+                              <TerminalSquare size={12} /> {suggestion.label}
+                            </button>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="text-[11px] text-zinc-500">Send a prompt to get command suggestions.</div>
+                      )}
+                      {commandOutput && (
+                        <pre className="text-[10px] mt-1 bg-[#0c0c0c] border border-[#2a2a2a] rounded-lg p-2 max-h-24 overflow-auto text-zinc-400 whitespace-pre-wrap">{commandOutput}</pre>
+                      )}
+                    </div>
+                  )}
+
+                  {utilityTab === 'sources' && (
+                    <div className="space-y-2">
+                      {attachedFiles.length > 0 && (
+                        <div className="flex flex-wrap gap-2">
+                          {attachedFiles.slice(0, 6).map((file) => (
+                            <span key={`${file.filename}-${file.path || ''}`} className="px-2 py-1 rounded-md text-[10px] bg-[#0f141f] border border-[#273249] text-sky-300">
+                              {file.filename}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      {citations.length > 0 ? (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          {citations.slice(0, 4).map((citation, idx) => (
+                            <div key={`${citation.filename}-${citation.chunk}-${idx}`} className="p-2 rounded-lg border border-[#2a2a2a] bg-[#101010]">
+                              <div className="text-[10px] text-zinc-500 mb-1">{citation.filename} · chunk {citation.chunk}</div>
+                              <div className="text-[11px] text-zinc-300 line-clamp-3">{citation.snippet}</div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="text-[11px] text-zinc-500">Attach files and ask a question to see source previews.</div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
             <div className="mt-4 flex items-center justify-center gap-6 text-[10px] font-bold text-zinc-700 uppercase tracking-widest">
               <div className="flex items-center gap-1.5">
                 <span className="w-1 h-1 rounded-full bg-zinc-800" />

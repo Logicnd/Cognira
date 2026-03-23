@@ -84,9 +84,11 @@ interface SlashCommandDefinition {
 
 interface QuickPaletteItem {
   id: string;
+  group: 'actions' | 'modes' | 'sessions' | 'commands';
   title: string;
   subtitle: string;
   keywords: string;
+  hint?: string;
   action: () => void;
 }
 
@@ -241,6 +243,8 @@ export default function CogniraApp() {
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [paletteQuery, setPaletteQuery] = useState('');
   const [paletteCursor, setPaletteCursor] = useState(0);
+  const [showShortcutsPanel, setShowShortcutsPanel] = useState(false);
+  const [isNearBottom, setIsNearBottom] = useState(true);
   const [editingMessageIndex, setEditingMessageIndex] = useState<number | null>(null);
   const [editingText, setEditingText] = useState('');
   const [isDraggingFiles, setIsDraggingFiles] = useState(false);
@@ -252,6 +256,7 @@ export default function CogniraApp() {
   const composerInputRef = useRef<HTMLTextAreaElement>(null);
   const historySearchRef = useRef<HTMLInputElement>(null);
   const paletteInputRef = useRef<HTMLInputElement>(null);
+  const chatScrollRef = useRef<HTMLDivElement>(null);
   const shouldReduceMotion = useReducedMotion();
 
   const handleQuickAction = (action: 'files' | 'image' | 'research' | 'shopping' | 'web' | 'more') => {
@@ -289,9 +294,22 @@ export default function CogniraApp() {
     messagesEndRef.current?.scrollIntoView({ behavior: LOW_RESOURCE_MODE ? 'auto' : 'smooth' });
   };
 
+  const handleChatScroll = () => {
+    const container = chatScrollRef.current;
+    if (!container) {
+      return;
+    }
+
+    const threshold = 120;
+    const distanceToBottom = container.scrollHeight - (container.scrollTop + container.clientHeight);
+    setIsNearBottom(distanceToBottom < threshold);
+  };
+
   useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
+    if (isNearBottom) {
+      scrollToBottom();
+    }
+  }, [messages, isNearBottom]);
 
   useEffect(() => {
     return () => {
@@ -327,6 +345,7 @@ export default function CogniraApp() {
       const storedDensity = localStorage.getItem('cognira_density_mode');
       const storedTopThinkingBadge = localStorage.getItem('cognira_show_top_thinking_badge');
       const storedSystemHealthCard = localStorage.getItem('cognira_show_system_health_card');
+      const storedSidebar = localStorage.getItem('cognira_show_sidebar');
       if (storedDevMode !== null) setDevMode(storedDevMode === 'true');
       if (storedWebAssist !== null) setWebAssistMode(storedWebAssist === 'true');
       if (storedConcise !== null) setConciseMode(storedConcise === 'true');
@@ -338,6 +357,7 @@ export default function CogniraApp() {
       if (storedDensity === 'compact' || storedDensity === 'comfortable') setDensityMode(storedDensity);
       if (storedTopThinkingBadge !== null) setShowTopThinkingBadge(storedTopThinkingBadge === 'true');
       if (storedSystemHealthCard !== null) setShowSystemHealthCard(storedSystemHealthCard === 'true');
+      if (storedSidebar !== null) setShowSidebar(storedSidebar === 'true');
     } catch (error) {
       console.error('Failed to load mode preferences', error);
     }
@@ -356,10 +376,11 @@ export default function CogniraApp() {
       localStorage.setItem('cognira_density_mode', densityMode);
       localStorage.setItem('cognira_show_top_thinking_badge', String(showTopThinkingBadge));
       localStorage.setItem('cognira_show_system_health_card', String(showSystemHealthCard));
+      localStorage.setItem('cognira_show_sidebar', String(showSidebar));
     } catch (error) {
       console.error('Failed to save mode preferences', error);
     }
-  }, [devMode, webAssistMode, conciseMode, performanceMode, personas, selectedPersonaId, reusableSystemPrompt, pinnedPrompts, densityMode, showTopThinkingBadge, showSystemHealthCard]);
+  }, [devMode, webAssistMode, conciseMode, performanceMode, personas, selectedPersonaId, reusableSystemPrompt, pinnedPrompts, densityMode, showTopThinkingBadge, showSystemHealthCard, showSidebar]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -369,9 +390,47 @@ export default function CogniraApp() {
         return;
       }
 
+      if ((event.ctrlKey || event.metaKey) && event.key === '/') {
+        event.preventDefault();
+        setShowShortcutsPanel((prev) => !prev);
+        return;
+      }
+
+      if (event.altKey && event.key === '1') {
+        event.preventDefault();
+        composerInputRef.current?.focus();
+        return;
+      }
+
+      if (event.altKey && event.key === '2') {
+        event.preventDefault();
+        setShowSidebar(true);
+        setTimeout(() => historySearchRef.current?.focus(), 0);
+        return;
+      }
+
+      if (event.altKey && event.key.toLowerCase() === 'n') {
+        event.preventDefault();
+        handleNewChat();
+        return;
+      }
+
+      if (event.altKey && event.key.toLowerCase() === 'b') {
+        event.preventDefault();
+        setShowSidebar((prev) => !prev);
+        return;
+      }
+
+      if ((event.ctrlKey || event.metaKey) && event.key === ',') {
+        event.preventDefault();
+        setShowSettingsPanel(true);
+        return;
+      }
+
       if (event.key === 'Escape') {
         setShowSettingsPanel(false);
         setShowCommandPalette(false);
+        setShowShortcutsPanel(false);
       }
     };
 
@@ -394,6 +453,27 @@ export default function CogniraApp() {
   useEffect(() => {
     setPaletteCursor(0);
   }, [paletteQuery]);
+
+  useEffect(() => {
+    try {
+      const storedDraft = localStorage.getItem(`cognira_draft_${sessionId}`);
+      if (storedDraft) {
+        setInput(storedDraft);
+      } else {
+        setInput('');
+      }
+    } catch (error) {
+      console.error('Failed to load session draft', error);
+    }
+  }, [sessionId]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(`cognira_draft_${sessionId}`, input);
+    } catch (error) {
+      console.error('Failed to save session draft', error);
+    }
+  }, [sessionId, input]);
 
   useEffect(() => {
     try {
@@ -917,6 +997,7 @@ export default function CogniraApp() {
     setShowTopThinkingBadge(true);
     setShowSystemHealthCard(true);
     setPerformanceMode(LOW_RESOURCE_MODE);
+    setShowSidebar(true);
   };
 
   const exportUiSettings = async () => {
@@ -925,6 +1006,7 @@ export default function CogniraApp() {
       showTopThinkingBadge,
       showSystemHealthCard,
       performanceMode,
+      showSidebar,
       selectedPersonaId,
       reusableSystemPrompt
     };
@@ -1027,82 +1109,221 @@ export default function CogniraApp() {
   const visibleSlashCommands = isSlashMode
     ? slashCommandDefinitions.filter((item) => item.command.startsWith(slashFilter || '/'))
     : [];
+  const currentSessionTitle = sessions.find((session) => session.id === sessionId)?.title || 'Active Session';
+  const activeModes = [
+    devMode ? 'Developer' : null,
+    webAssistMode ? 'Web' : null,
+    conciseMode ? 'Concise' : null,
+    performanceMode ? 'Performance' : null
+  ].filter(Boolean) as string[];
+
+  const closePalette = () => {
+    setShowCommandPalette(false);
+  };
+
   const quickPaletteItems: QuickPaletteItem[] = [
     {
       id: 'new-chat',
+      group: 'actions',
       title: 'Start New Chat',
       subtitle: 'Create a fresh session',
       keywords: 'new chat session clear',
+      hint: 'Alt+N',
       action: () => {
         handleNewChat();
-        setShowCommandPalette(false);
+        closePalette();
       }
     },
     {
       id: 'toggle-sidebar',
+      group: 'actions',
       title: showSidebar ? 'Hide Sidebar' : 'Show Sidebar',
       subtitle: 'Toggle chat navigation panel',
       keywords: 'sidebar nav panel toggle',
+      hint: 'Alt+B',
       action: () => {
         setShowSidebar((prev) => !prev);
-        setShowCommandPalette(false);
+        closePalette();
       }
     },
     {
       id: 'open-settings',
+      group: 'actions',
       title: 'Open Settings',
       subtitle: 'Configure UI and behavior',
       keywords: 'settings preferences config',
+      hint: 'Ctrl+,',
       action: () => {
         setShowSettingsPanel(true);
-        setShowCommandPalette(false);
+        closePalette();
       }
     },
     {
       id: 'focus-composer',
+      group: 'actions',
       title: 'Focus Composer',
       subtitle: 'Jump to message input',
       keywords: 'input compose prompt',
+      hint: 'Alt+1',
       action: () => {
         composerInputRef.current?.focus();
-        setShowCommandPalette(false);
+        closePalette();
       }
     },
     {
       id: 'focus-history',
+      group: 'actions',
       title: 'Search Sessions',
       subtitle: 'Focus history search',
       keywords: 'history sessions search',
+      hint: 'Alt+2',
       action: () => {
         setShowSidebar(true);
         setTimeout(() => historySearchRef.current?.focus(), 0);
-        setShowCommandPalette(false);
+        closePalette();
       }
     },
+    {
+      id: 'show-shortcuts',
+      group: 'actions',
+      title: 'Open Keyboard Shortcuts',
+      subtitle: 'View productivity shortcuts',
+      keywords: 'help shortcuts keyboard',
+      hint: 'Ctrl+/',
+      action: () => {
+        setShowShortcutsPanel(true);
+        closePalette();
+      }
+    },
+    {
+      id: 'copy-session-id',
+      group: 'actions',
+      title: 'Copy Session ID',
+      subtitle: `Copy ${sessionId}`,
+      keywords: 'session id copy',
+      action: () => {
+        void copyToClipboard(sessionId);
+        closePalette();
+      }
+    },
+    {
+      id: 'mode-dev',
+      group: 'modes',
+      title: `${devMode ? 'Disable' : 'Enable'} Developer Mode`,
+      subtitle: 'Technical implementation-focused responses',
+      keywords: 'mode developer debug code',
+      action: () => {
+        setDevMode((prev) => !prev);
+        closePalette();
+      }
+    },
+    {
+      id: 'mode-web',
+      group: 'modes',
+      title: `${webAssistMode ? 'Disable' : 'Enable'} Web Assist`,
+      subtitle: 'Web fallback when cloud model is unavailable',
+      keywords: 'mode web fallback search',
+      action: () => {
+        setWebAssistMode((prev) => !prev);
+        closePalette();
+      }
+    },
+    {
+      id: 'mode-concise',
+      group: 'modes',
+      title: `${conciseMode ? 'Disable' : 'Enable'} Concise Mode`,
+      subtitle: 'Shorter practical responses',
+      keywords: 'mode concise short',
+      action: () => {
+        setConciseMode((prev) => !prev);
+        closePalette();
+      }
+    },
+    {
+      id: 'mode-performance',
+      group: 'modes',
+      title: `${performanceMode ? 'Disable' : 'Enable'} Performance Mode`,
+      subtitle: 'Lower rendering and polling overhead',
+      keywords: 'mode performance speed',
+      action: () => {
+        setPerformanceMode((prev) => !prev);
+        closePalette();
+      }
+    },
+    ...slashCommandDefinitions.map((item) => ({
+      id: `slash-${item.command}`,
+      group: 'commands' as const,
+      title: `Insert ${item.command}`,
+      subtitle: item.description,
+      keywords: `${item.command} slash command`,
+      hint: 'Slash',
+      action: () => {
+        setInput(`${item.command} `);
+        setTimeout(() => composerInputRef.current?.focus(), 0);
+        closePalette();
+      }
+    })),
     ...filteredSessions.slice(0, 8).map((session, idx) => ({
       id: `session-${session.id || idx}`,
+      group: 'sessions' as const,
       title: session.title || 'Untitled Session',
       subtitle: `Open ${session.id}`,
       keywords: `${session.title} ${session.id} recent history`,
+      hint: 'Enter',
       action: () => {
         setSessionId(session.id);
-        setShowCommandPalette(false);
+        closePalette();
       }
     }))
   ];
+
   const normalizedPaletteQuery = paletteQuery.trim().toLowerCase();
-  const visiblePaletteItems = quickPaletteItems.filter((item) => {
-    if (!normalizedPaletteQuery) {
-      return true;
+  const getPaletteScore = (item: QuickPaletteItem, query: string) => {
+    if (!query) {
+      return 1;
     }
 
-    const searchable = `${item.title} ${item.subtitle} ${item.keywords}`.toLowerCase();
-    return searchable.includes(normalizedPaletteQuery);
-  });
+    const title = item.title.toLowerCase();
+    const subtitle = item.subtitle.toLowerCase();
+    const keywords = item.keywords.toLowerCase();
+
+    if (title === query) return 100;
+    if (title.startsWith(query)) return 75;
+    if (keywords.includes(query)) return 55;
+    if (subtitle.includes(query)) return 40;
+
+    const terms = query.split(/\s+/).filter(Boolean);
+    if (terms.length > 1 && terms.every((term) => `${title} ${subtitle} ${keywords}`.includes(term))) {
+      return 28;
+    }
+
+    return 0;
+  };
+
+  const visiblePaletteItems = quickPaletteItems
+    .map((item) => ({ item, score: getPaletteScore(item, normalizedPaletteQuery) }))
+    .filter(({ score }) => score > 0)
+    .sort((a, b) => b.score - a.score)
+    .map(({ item }) => item);
 
   const safePaletteCursor = visiblePaletteItems.length === 0
     ? 0
     : Math.min(paletteCursor, visiblePaletteItems.length - 1);
+  const paletteGroupOrder: Array<{ key: QuickPaletteItem['group']; label: string }> = [
+    { key: 'actions', label: 'Actions' },
+    { key: 'modes', label: 'Modes' },
+    { key: 'commands', label: 'Commands' },
+    { key: 'sessions', label: 'Sessions' }
+  ];
+  const groupedPaletteItems = paletteGroupOrder
+    .map(({ key, label }) => ({
+      key,
+      label,
+      items: visiblePaletteItems.filter((item) => item.group === key)
+    }))
+    .filter((group) => group.items.length > 0);
+  const inputCharCount = input.length;
+  const hasDraft = input.trim().length > 0;
 
   return (
     <div className="flex h-screen bg-[#000000] text-zinc-100 font-sans overflow-hidden">
@@ -1301,6 +1522,13 @@ export default function CogniraApp() {
               <Info size={12} />
               <span>Cognira V1.0</span>
             </div>
+            <div className="hidden lg:flex items-center gap-1 text-[10px] uppercase tracking-widest text-zinc-600">
+              <span>Chat</span>
+              <span className="text-zinc-800">/</span>
+              <span className="max-w-[160px] truncate text-zinc-400">{currentSessionTitle}</span>
+              <span className="text-zinc-800">/</span>
+              <span className="text-zinc-500">{model}</span>
+            </div>
             <div className="hidden md:flex items-center gap-1 rounded-lg border border-[#232323] bg-[#0f0f10] p-1">
               <button
                 onClick={() => composerInputRef.current?.focus()}
@@ -1327,6 +1555,10 @@ export default function CogniraApp() {
           </div>
           
           <div className="flex items-center gap-4">
+            <div className="hidden md:inline-flex items-center gap-2 px-2.5 py-1 rounded-full border border-[#252525] bg-[#0f0f10] text-[10px] uppercase tracking-widest text-zinc-500">
+              <span>{personas.find((p) => p.id === selectedPersonaId)?.name || 'Balanced'}</span>
+              {activeModes.length > 0 && <span className="text-zinc-700">• {activeModes.join(' • ')}</span>}
+            </div>
             {isLoading && showTopThinkingBadge && (
               <div className="flex items-center gap-2 text-[10px] font-mono text-[#ff7a00] animate-pulse">
                 <Activity size={12} />
@@ -1352,7 +1584,7 @@ export default function CogniraApp() {
         </header>
 
         {/* Chat Area */}
-        <div className="flex-1 overflow-y-auto scrollbar-hide">
+        <div ref={chatScrollRef} onScroll={handleChatScroll} className="flex-1 overflow-y-auto scrollbar-hide">
           <div className={cn(
             "max-w-3xl mx-auto px-6",
             densityMode === 'compact' ? 'py-8 space-y-8' : 'py-12 space-y-12'
@@ -1516,6 +1748,20 @@ export default function CogniraApp() {
             <div ref={messagesEndRef} />
           </div>
         </div>
+
+        {!isNearBottom && messages.length > 3 && (
+          <div className="absolute right-6 bottom-44 z-30">
+            <button
+              onClick={() => {
+                scrollToBottom();
+                setIsNearBottom(true);
+              }}
+              className="px-3 py-2 rounded-full border border-[#2a2a2a] bg-[#111111]/95 text-[11px] text-zinc-300 hover:text-white hover:border-zinc-500 transition-colors"
+            >
+              Jump to latest
+            </button>
+          </div>
+        )}
 
         {editingMessageIndex !== null && (
           <div className="px-4 sm:px-8 pb-2">
@@ -1756,20 +2002,26 @@ export default function CogniraApp() {
                 </button>
               </div>
             </div>
-            <div className="mt-2 h-5 flex items-center justify-start gap-2 px-2">
+            <div className="mt-2 min-h-5 flex items-center justify-between gap-3 px-2">
+              <div className="flex items-center gap-2">
               <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">{personas.find(p => p.id === selectedPersonaId)?.name || 'Balanced'}</span>
               {devMode && (
-                <span className="text-[10px] font-bold uppercase tracking-widest text-[#ff7a00]">Developer mode</span>
+                <button onClick={() => setDevMode(false)} className="text-[10px] font-bold uppercase tracking-widest text-[#ff7a00] hover:opacity-80">Developer mode</button>
               )}
               {webAssistMode && (
-                <span className="text-[10px] font-bold uppercase tracking-widest text-emerald-400">Web assist</span>
+                <button onClick={() => setWebAssistMode(false)} className="text-[10px] font-bold uppercase tracking-widest text-emerald-400 hover:opacity-80">Web assist</button>
               )}
               {conciseMode && (
-                <span className="text-[10px] font-bold uppercase tracking-widest text-sky-400">Concise</span>
+                <button onClick={() => setConciseMode(false)} className="text-[10px] font-bold uppercase tracking-widest text-sky-400 hover:opacity-80">Concise</button>
               )}
               {performanceMode && (
-                <span className="text-[10px] font-bold uppercase tracking-widest text-amber-400">Performance</span>
+                <button onClick={() => setPerformanceMode(false)} className="text-[10px] font-bold uppercase tracking-widest text-amber-400 hover:opacity-80">Performance</button>
               )}
+              </div>
+              <div className="flex items-center gap-2 text-[10px] uppercase tracking-widest text-zinc-600">
+                {hasDraft && <span className="text-zinc-500">Draft</span>}
+                <span>{inputCharCount} chars</span>
+              </div>
             </div>
 
             {isSlashMode && (
@@ -1831,6 +2083,20 @@ export default function CogniraApp() {
                 <span className="w-1 h-1 rounded-full bg-zinc-800" />
                 MODEL: {model}
               </div>
+              <button
+                onClick={() => setShowCommandPalette(true)}
+                className="flex items-center gap-1.5 hover:text-zinc-500 transition-colors"
+              >
+                <span className="w-1 h-1 rounded-full bg-zinc-800" />
+                CTRL/CMD + K
+              </button>
+              <button
+                onClick={() => setShowShortcutsPanel(true)}
+                className="flex items-center gap-1.5 hover:text-zinc-500 transition-colors"
+              >
+                <span className="w-1 h-1 rounded-full bg-zinc-800" />
+                SHORTCUTS
+              </button>
             </div>
           </div>
         </div>
@@ -1900,21 +2166,36 @@ export default function CogniraApp() {
 
                 <div className="max-h-[52vh] overflow-y-auto p-2">
                   {visiblePaletteItems.length > 0 ? (
-                    <div className="space-y-1">
-                      {visiblePaletteItems.map((item, idx) => (
-                        <button
-                          key={item.id}
-                          onClick={item.action}
-                          className={cn(
-                            'w-full text-left px-3 py-2.5 rounded-lg border transition-colors',
-                            idx === safePaletteCursor
-                              ? 'border-[#ff7a00]/35 bg-[#1a130d]'
-                              : 'border-transparent hover:border-[#2a2a2a] hover:bg-[#181818]'
-                          )}
-                        >
-                          <div className="text-sm text-zinc-200 font-medium">{item.title}</div>
-                          <div className="text-[11px] text-zinc-500">{item.subtitle}</div>
-                        </button>
+                    <div className="space-y-3">
+                      {groupedPaletteItems.map((group) => (
+                        <div key={group.key} className="space-y-1.5">
+                          <div className="px-2 text-[10px] uppercase tracking-widest text-zinc-600">{group.label}</div>
+                          {group.items.map((item) => {
+                            const globalIndex = visiblePaletteItems.findIndex((entry) => entry.id === item.id);
+                            return (
+                              <button
+                                key={item.id}
+                                onClick={item.action}
+                                className={cn(
+                                  'w-full text-left px-3 py-2.5 rounded-lg border transition-colors flex items-start justify-between gap-2',
+                                  globalIndex === safePaletteCursor
+                                    ? 'border-[#ff7a00]/35 bg-[#1a130d]'
+                                    : 'border-transparent hover:border-[#2a2a2a] hover:bg-[#181818]'
+                                )}
+                              >
+                                <div>
+                                  <div className="text-sm text-zinc-200 font-medium">{item.title}</div>
+                                  <div className="text-[11px] text-zinc-500">{item.subtitle}</div>
+                                </div>
+                                {item.hint && (
+                                  <span className="text-[10px] uppercase tracking-widest text-zinc-600 border border-[#2a2a2a] rounded-md px-1.5 py-0.5">
+                                    {item.hint}
+                                  </span>
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
                       ))}
                     </div>
                   ) : (
@@ -1927,20 +2208,74 @@ export default function CogniraApp() {
         </AnimatePresence>
 
         <AnimatePresence>
-          {showSettingsPanel && (
+          {showShortcutsPanel && (
             <>
               <motion.div
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
                 className="fixed inset-0 bg-black/55 z-40"
+                onClick={() => setShowShortcutsPanel(false)}
+              />
+              <motion.div
+                initial={shouldReduceMotion ? false : { opacity: 0, y: 10, scale: 0.98 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, y: 10, scale: 0.98 }}
+                transition={shouldReduceMotion ? { duration: 0 } : { duration: 0.16 }}
+                className="fixed top-24 left-1/2 -translate-x-1/2 z-50 w-[min(92vw,560px)] rounded-2xl border border-[#2b2b2b] bg-[#101011] shadow-2xl"
+              >
+                <div className="px-4 py-3 border-b border-[#262626] flex items-center justify-between">
+                  <div>
+                    <div className="text-sm font-semibold text-zinc-100">Keyboard Shortcuts</div>
+                    <div className="text-[11px] text-zinc-500">Speed up navigation and actions</div>
+                  </div>
+                  <button
+                    onClick={() => setShowShortcutsPanel(false)}
+                    className="p-2 rounded-md text-zinc-400 hover:text-white hover:bg-[#1a1a1a]"
+                    aria-label="Close shortcuts panel"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+                <div className="p-4 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {[
+                    ['Ctrl/Cmd + K', 'Open quick navigator'],
+                    ['Ctrl/Cmd + /', 'Open shortcuts panel'],
+                    ['Ctrl/Cmd + ,', 'Open settings'],
+                    ['Alt + 1', 'Focus composer'],
+                    ['Alt + 2', 'Focus history search'],
+                    ['Alt + N', 'Start new chat'],
+                    ['Alt + B', 'Toggle sidebar'],
+                    ['Enter', 'Send message'],
+                    ['Shift + Enter', 'New line in composer']
+                  ].map(([keys, desc]) => (
+                    <div key={keys} className="rounded-lg border border-[#252525] bg-[#121212] px-3 py-2.5 flex items-center justify-between gap-3">
+                      <span className="text-[11px] text-zinc-300">{desc}</span>
+                      <span className="text-[10px] uppercase tracking-widest text-zinc-500 border border-[#2a2a2a] rounded-md px-2 py-0.5">{keys}</span>
+                    </div>
+                  ))}
+                </div>
+              </motion.div>
+            </>
+          )}
+        </AnimatePresence>
+
+        <AnimatePresence>
+          {showSettingsPanel && (
+            <>
+              <motion.div
+                initial={shouldReduceMotion ? false : { opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={shouldReduceMotion ? { duration: 0 } : { duration: 0.16 }}
+                className="fixed inset-0 bg-black/55 z-40"
                 onClick={() => setShowSettingsPanel(false)}
               />
               <motion.aside
-                initial={{ x: 360, opacity: 0 }}
+                initial={shouldReduceMotion ? false : { x: 360, opacity: 0 }}
                 animate={{ x: 0, opacity: 1 }}
-                exit={{ x: 360, opacity: 0 }}
-                transition={{ type: 'spring', stiffness: 260, damping: 26 }}
+                exit={shouldReduceMotion ? { opacity: 0 } : { x: 360, opacity: 0 }}
+                transition={shouldReduceMotion ? { duration: 0 } : { type: 'spring', stiffness: 260, damping: 26 }}
                 className="fixed top-0 right-0 h-full w-[min(92vw,360px)] z-50 bg-[#0f0f10] border-l border-[#262626] shadow-2xl"
               >
                 <div className="h-full flex flex-col">
@@ -1977,6 +2312,10 @@ export default function CogniraApp() {
                           <span className="text-[11px] text-emerald-400 font-medium">Enabled</span>
                         </label>
                         <label className="flex items-center justify-between text-sm text-zinc-300">
+                          <span>Show sidebar navigation</span>
+                          <input type="checkbox" checked={showSidebar} onChange={(e) => setShowSidebar(e.target.checked)} />
+                        </label>
+                        <label className="flex items-center justify-between text-sm text-zinc-300">
                           <span>Show top thinking badge</span>
                           <input type="checkbox" checked={showTopThinkingBadge} onChange={(e) => setShowTopThinkingBadge(e.target.checked)} />
                         </label>
@@ -1993,6 +2332,15 @@ export default function CogniraApp() {
                         <span>Performance mode</span>
                         <input type="checkbox" checked={performanceMode} onChange={(e) => setPerformanceMode(e.target.checked)} />
                       </label>
+                      <button
+                        onClick={() => {
+                          setShowSettingsPanel(false);
+                          setShowShortcutsPanel(true);
+                        }}
+                        className="w-full text-left px-3 py-2 rounded-lg border border-[#2a2a2a] bg-[#161616] text-zinc-300 text-xs hover:bg-[#1c1c1c]"
+                      >
+                        View keyboard shortcuts
+                      </button>
                       <div className="text-[11px] text-zinc-500">Performance mode reduces rendering work and polling frequency.</div>
                     </div>
 

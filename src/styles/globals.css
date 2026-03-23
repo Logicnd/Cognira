@@ -59,3 +59,14 @@ body {
     scroll-behavior: auto !important;
   }
 }
+
+/* Remove UA focus ring artifacts only inside the chatbar. */
+.chatbar-shell,
+.chatbar-shell:focus,
+.chatbar-shell:focus-visible,
+.chatbar-shell:focus-within,
+.chatbar-shell *:focus,
+.chatbar-shell *:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+}

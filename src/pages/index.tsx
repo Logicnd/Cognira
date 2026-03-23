@@ -1813,8 +1813,8 @@ export default function CogniraApp() {
               </div>
             )}
             <div className={cn(
-              "relative group bg-[#2b2b2b] border rounded-[28px] transition-all duration-300",
-              devMode ? "border-[#ff7a00]/30 focus-within:border-[#ff7a00] focus-within:ring-4 focus-within:ring-[#ff7a00]/5" : "border-[#3a3a3a] focus-within:border-zinc-500 focus-within:ring-2 focus-within:ring-white/10"
+              "chatbar-shell relative group bg-[#2b2b2b] border rounded-[28px] transition-all duration-300",
+              devMode ? "border-[#ff7a00]/30 focus-within:border-[#ff7a00]" : "border-[#3a3a3a] focus-within:border-zinc-500"
             )}>
               <input
                 ref={fileInputRef}
@@ -1965,7 +1965,7 @@ export default function CogniraApp() {
                 }}
                 placeholder="Ask anything"
                 aria-label="Message composer"
-                className="w-full bg-transparent p-4 pl-14 pr-28 min-h-[56px] max-h-48 overflow-y-auto text-zinc-100 placeholder-zinc-500 focus:outline-none resize-none text-[15px]"
+                className="chatbar-input w-full bg-transparent p-4 pl-14 pr-28 min-h-[56px] max-h-48 overflow-y-auto text-zinc-100 placeholder-zinc-500 focus:outline-none focus-visible:outline-none resize-none text-[15px]"
                 rows={1}
               />
               <div className="absolute right-3 bottom-3 flex items-center gap-1.5">

@@ -38,7 +38,7 @@ import {
 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
 import axios from 'axios';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -80,6 +80,14 @@ interface CitationItem {
 interface SlashCommandDefinition {
   command: string;
   description: string;
+}
+
+interface QuickPaletteItem {
+  id: string;
+  title: string;
+  subtitle: string;
+  keywords: string;
+  action: () => void;
 }
 
 type DensityMode = 'comfortable' | 'compact';
@@ -230,6 +238,9 @@ export default function CogniraApp() {
   const [densityMode, setDensityMode] = useState<DensityMode>('comfortable');
   const [showTopThinkingBadge, setShowTopThinkingBadge] = useState(true);
   const [showSystemHealthCard, setShowSystemHealthCard] = useState(true);
+  const [showCommandPalette, setShowCommandPalette] = useState(false);
+  const [paletteQuery, setPaletteQuery] = useState('');
+  const [paletteCursor, setPaletteCursor] = useState(0);
   const [editingMessageIndex, setEditingMessageIndex] = useState<number | null>(null);
   const [editingText, setEditingText] = useState('');
   const [isDraggingFiles, setIsDraggingFiles] = useState(false);
@@ -238,6 +249,10 @@ export default function CogniraApp() {
   const recognitionRef = useRef<BrowserSpeechRecognition | null>(null);
   const modeMenuRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const composerInputRef = useRef<HTMLTextAreaElement>(null);
+  const historySearchRef = useRef<HTMLInputElement>(null);
+  const paletteInputRef = useRef<HTMLInputElement>(null);
+  const shouldReduceMotion = useReducedMotion();
 
   const handleQuickAction = (action: 'files' | 'image' | 'research' | 'shopping' | 'web' | 'more') => {
     const quickPrompts: Record<typeof action, string> = {
@@ -348,14 +363,37 @@ export default function CogniraApp() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        setShowCommandPalette((prev) => !prev);
+        return;
+      }
+
       if (event.key === 'Escape') {
         setShowSettingsPanel(false);
+        setShowCommandPalette(false);
       }
     };
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
+
+  useEffect(() => {
+    if (!showCommandPalette) {
+      setPaletteQuery('');
+      setPaletteCursor(0);
+      return;
+    }
+
+    setTimeout(() => {
+      paletteInputRef.current?.focus();
+    }, 0);
+  }, [showCommandPalette]);
+
+  useEffect(() => {
+    setPaletteCursor(0);
+  }, [paletteQuery]);
 
   useEffect(() => {
     try {
@@ -989,6 +1027,82 @@ export default function CogniraApp() {
   const visibleSlashCommands = isSlashMode
     ? slashCommandDefinitions.filter((item) => item.command.startsWith(slashFilter || '/'))
     : [];
+  const quickPaletteItems: QuickPaletteItem[] = [
+    {
+      id: 'new-chat',
+      title: 'Start New Chat',
+      subtitle: 'Create a fresh session',
+      keywords: 'new chat session clear',
+      action: () => {
+        handleNewChat();
+        setShowCommandPalette(false);
+      }
+    },
+    {
+      id: 'toggle-sidebar',
+      title: showSidebar ? 'Hide Sidebar' : 'Show Sidebar',
+      subtitle: 'Toggle chat navigation panel',
+      keywords: 'sidebar nav panel toggle',
+      action: () => {
+        setShowSidebar((prev) => !prev);
+        setShowCommandPalette(false);
+      }
+    },
+    {
+      id: 'open-settings',
+      title: 'Open Settings',
+      subtitle: 'Configure UI and behavior',
+      keywords: 'settings preferences config',
+      action: () => {
+        setShowSettingsPanel(true);
+        setShowCommandPalette(false);
+      }
+    },
+    {
+      id: 'focus-composer',
+      title: 'Focus Composer',
+      subtitle: 'Jump to message input',
+      keywords: 'input compose prompt',
+      action: () => {
+        composerInputRef.current?.focus();
+        setShowCommandPalette(false);
+      }
+    },
+    {
+      id: 'focus-history',
+      title: 'Search Sessions',
+      subtitle: 'Focus history search',
+      keywords: 'history sessions search',
+      action: () => {
+        setShowSidebar(true);
+        setTimeout(() => historySearchRef.current?.focus(), 0);
+        setShowCommandPalette(false);
+      }
+    },
+    ...filteredSessions.slice(0, 8).map((session, idx) => ({
+      id: `session-${session.id || idx}`,
+      title: session.title || 'Untitled Session',
+      subtitle: `Open ${session.id}`,
+      keywords: `${session.title} ${session.id} recent history`,
+      action: () => {
+        setSessionId(session.id);
+        setShowCommandPalette(false);
+      }
+    }))
+  ];
+  const normalizedPaletteQuery = paletteQuery.trim().toLowerCase();
+  const visiblePaletteItems = quickPaletteItems.filter((item) => {
+    if (!normalizedPaletteQuery) {
+      return true;
+    }
+
+    const searchable = `${item.title} ${item.subtitle} ${item.keywords}`.toLowerCase();
+    return searchable.includes(normalizedPaletteQuery);
+  });
+
+  const safePaletteCursor = visiblePaletteItems.length === 0
+    ? 0
+    : Math.min(paletteCursor, visiblePaletteItems.length - 1);
 
   return (
     <div className="flex h-screen bg-[#000000] text-zinc-100 font-sans overflow-hidden">
@@ -1000,9 +1114,10 @@ export default function CogniraApp() {
       <AnimatePresence>
         {devMode && (
           <motion.div 
-            initial={{ height: 0, opacity: 0 }}
+            initial={shouldReduceMotion ? false : { height: 0, opacity: 0 }}
             animate={{ height: 28, opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
+            exit={shouldReduceMotion ? { opacity: 0 } : { height: 0, opacity: 0 }}
+            transition={shouldReduceMotion ? { duration: 0 } : { duration: 0.22 }}
             className="fixed top-0 left-0 right-0 bg-[#ff7a00] text-black text-[10px] font-bold uppercase tracking-[0.2em] flex items-center justify-center z-[100] overflow-hidden"
           >
             Developer Mode Enabled
@@ -1014,9 +1129,10 @@ export default function CogniraApp() {
       <AnimatePresence>
         {showSidebar && (
           <motion.div 
-            initial={{ width: 0, opacity: 0 }}
+            initial={shouldReduceMotion ? false : { width: 0, opacity: 0 }}
             animate={{ width: 280, opacity: 1 }}
-            exit={{ width: 0, opacity: 0 }}
+            exit={shouldReduceMotion ? { opacity: 0 } : { width: 0, opacity: 0 }}
+            transition={shouldReduceMotion ? { duration: 0 } : { duration: 0.24 }}
             className={cn(
               "flex flex-col border-r border-[#2a2a2a] bg-[#111111] z-20 transition-all duration-300",
               devMode && "pt-[28px]"
@@ -1080,10 +1196,12 @@ export default function CogniraApp() {
                 {/* Session Search */}
                 <div className="relative px-2">
                   <input 
+                    ref={historySearchRef}
                     type="text"
                     placeholder="Search history..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
+                    aria-label="Search sessions"
                     className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg py-1.5 px-3 text-[11px] focus:outline-none focus:ring-1 focus:ring-[#ff7a00]/30 transition-all text-zinc-400 placeholder-zinc-700"
                   />
                 </div>
@@ -1174,6 +1292,7 @@ export default function CogniraApp() {
           <div className="flex items-center gap-4">
             <button 
               onClick={() => setShowSidebar(!showSidebar)}
+              aria-label={showSidebar ? 'Collapse sidebar' : 'Expand sidebar'}
               className="p-2 -ml-2 hover:bg-[#1a1a1a] rounded-md transition-colors text-zinc-500 hover:text-white"
             >
               <ChevronRight className={cn("transition-transform duration-300", showSidebar && "rotate-180")} size={18} />
@@ -1181,6 +1300,29 @@ export default function CogniraApp() {
             <div className="flex items-center gap-2 text-[10px] font-bold text-zinc-600 uppercase tracking-[0.2em]">
               <Info size={12} />
               <span>Cognira V1.0</span>
+            </div>
+            <div className="hidden md:flex items-center gap-1 rounded-lg border border-[#232323] bg-[#0f0f10] p-1">
+              <button
+                onClick={() => composerInputRef.current?.focus()}
+                className="px-2 py-1 rounded-md text-[10px] uppercase tracking-widest text-zinc-300 hover:bg-[#1b1b1b]"
+              >
+                Chat
+              </button>
+              <button
+                onClick={() => {
+                  setShowSidebar(true);
+                  setTimeout(() => historySearchRef.current?.focus(), 0);
+                }}
+                className="px-2 py-1 rounded-md text-[10px] uppercase tracking-widest text-zinc-400 hover:bg-[#1b1b1b]"
+              >
+                History
+              </button>
+              <button
+                onClick={() => setShowSettingsPanel(true)}
+                className="px-2 py-1 rounded-md text-[10px] uppercase tracking-widest text-zinc-400 hover:bg-[#1b1b1b]"
+              >
+                Settings
+              </button>
             </div>
           </div>
           
@@ -1192,7 +1334,16 @@ export default function CogniraApp() {
               </div>
             )}
             <button
+              onClick={() => setShowCommandPalette(true)}
+              className="hidden sm:inline-flex items-center gap-2 px-2.5 py-1.5 rounded-md border border-[#2a2a2a] text-[10px] uppercase tracking-widest text-zinc-400 hover:text-zinc-100 hover:bg-[#151515]"
+              aria-label="Open quick actions"
+            >
+              <span>Quick</span>
+              <span className="text-zinc-600">Ctrl+K</span>
+            </button>
+            <button
               onClick={() => setShowSettingsPanel(true)}
+              aria-label="Open settings"
               className="p-2 hover:bg-[#1a1a1a] rounded-md transition-colors text-zinc-500 hover:text-white"
             >
               <Settings size={18} />
@@ -1209,8 +1360,9 @@ export default function CogniraApp() {
             {messages.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-[60vh] text-center space-y-8">
                 <motion.div 
-                  initial={{ scale: 0.9, opacity: 0 }}
+                  initial={shouldReduceMotion ? false : { scale: 0.9, opacity: 0 }}
                   animate={{ scale: 1, opacity: 1 }}
+                  transition={shouldReduceMotion ? { duration: 0 } : { duration: 0.3 }}
                   className={cn(
                     "w-16 h-16 rounded-2xl flex items-center justify-center border transition-all duration-500",
                     devMode ? "bg-[#ff7a00]/5 border-[#ff7a00]/20 text-[#ff7a00]" : "bg-white/5 border-white/10 text-white"
@@ -1245,8 +1397,9 @@ export default function CogniraApp() {
                 const globalIndex = renderedOffset + i;
                 return (
                 <motion.div 
-                  initial={performanceMode ? false : { opacity: 0, y: 10 }}
+                  initial={performanceMode || shouldReduceMotion ? false : { opacity: 0, y: 10 }}
                   animate={performanceMode ? { opacity: 1, y: 0 } : { opacity: 1, y: 0 }}
+                  transition={shouldReduceMotion ? { duration: 0 } : { duration: 0.22, delay: Math.min(i * 0.015, 0.18) }}
                   key={globalIndex} 
                   className={cn(
                     "flex gap-6 group",
@@ -1421,6 +1574,7 @@ export default function CogniraApp() {
               <div ref={modeMenuRef} className="absolute left-3 bottom-3 z-20">
                 <button
                   onClick={() => setShowModeMenu(prev => !prev)}
+                  aria-label="Open mode menu"
                   className={cn(
                     "p-2.5 rounded-xl transition-all border",
                     devMode
@@ -1435,9 +1589,10 @@ export default function CogniraApp() {
                 <AnimatePresence>
                   {showModeMenu && (
                     <motion.div
-                      initial={{ opacity: 0, y: 8, scale: 0.98 }}
+                      initial={shouldReduceMotion ? false : { opacity: 0, y: 8, scale: 0.98 }}
                       animate={{ opacity: 1, y: 0, scale: 1 }}
-                      exit={{ opacity: 0, y: 8, scale: 0.98 }}
+                      exit={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, y: 8, scale: 0.98 }}
+                      transition={shouldReduceMotion ? { duration: 0 } : { duration: 0.18 }}
                       className="absolute bottom-12 left-0 w-[260px] bg-[#121212] border border-[#2b2b2b] rounded-2xl shadow-2xl overflow-hidden"
                     >
                       <div className="px-2 py-2">
@@ -1540,6 +1695,7 @@ export default function CogniraApp() {
               </div>
 
               <textarea
+                ref={composerInputRef}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => {
@@ -1549,16 +1705,18 @@ export default function CogniraApp() {
                   }
                   if (e.key === 'k' && (e.metaKey || e.ctrlKey)) {
                     e.preventDefault();
-                    handleNewChat();
+                    setShowCommandPalette(true);
                   }
                 }}
                 placeholder="Ask Cognira... (type / for commands)"
+                aria-label="Message composer"
                 className="w-full bg-transparent p-5 pl-16 pr-32 min-h-[60px] max-h-48 overflow-y-auto text-zinc-200 placeholder-zinc-700 focus:outline-none resize-none text-sm font-medium"
                 rows={1}
               />
               <div className="absolute right-3 bottom-3 flex items-center gap-2">
                 <button
                   onClick={() => fileInputRef.current?.click()}
+                  aria-label="Attach files"
                   className="p-2.5 rounded-xl transition-all text-zinc-600 hover:text-white hover:bg-white/5"
                   title="Attach files"
                 >
@@ -1566,6 +1724,7 @@ export default function CogniraApp() {
                 </button>
                 <button
                   onClick={pinCurrentPrompt}
+                  aria-label="Pin current prompt"
                   className="p-2.5 rounded-xl transition-all text-zinc-600 hover:text-white hover:bg-white/5"
                   title="Pin this prompt"
                 >
@@ -1573,6 +1732,7 @@ export default function CogniraApp() {
                 </button>
                 <button 
                   onClick={toggleVoiceInput}
+                  aria-label="Toggle voice input"
                   className={cn(
                     "p-2.5 rounded-xl transition-all",
                     isRecording ? "bg-red-500/10 text-red-500 animate-pulse" : "text-zinc-600 hover:text-white hover:bg-white/5"
@@ -1583,6 +1743,7 @@ export default function CogniraApp() {
                 </button>
                 <button 
                   onClick={() => { void handleSendMessage(); }}
+                  aria-label="Send message"
                   disabled={!input.trim() || isLoading}
                   className={cn(
                     "p-2.5 rounded-xl transition-all",
@@ -1673,6 +1834,97 @@ export default function CogniraApp() {
             </div>
           </div>
         </div>
+
+        <div className="sr-only" aria-live="polite" aria-atomic="true">
+          {isLoading ? `${thinkingLabel}. ${thinkingStatus}.` : 'Idle.'}
+        </div>
+
+        <AnimatePresence>
+          {showCommandPalette && (
+            <>
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={shouldReduceMotion ? { duration: 0 } : { duration: 0.14 }}
+                className="fixed inset-0 bg-black/55 z-40"
+                onClick={() => setShowCommandPalette(false)}
+              />
+              <motion.div
+                initial={shouldReduceMotion ? false : { opacity: 0, y: -8, scale: 0.98 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, y: -8, scale: 0.98 }}
+                transition={shouldReduceMotion ? { duration: 0 } : { duration: 0.16 }}
+                className="fixed top-20 left-1/2 -translate-x-1/2 z-50 w-[min(92vw,680px)] rounded-2xl border border-[#2b2b2b] bg-[#101011] shadow-2xl"
+              >
+                <div className="p-3 border-b border-[#262626]">
+                  <input
+                    ref={paletteInputRef}
+                    value={paletteQuery}
+                    onChange={(e) => setPaletteQuery(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Escape') {
+                        setShowCommandPalette(false);
+                        return;
+                      }
+
+                      if (e.key === 'ArrowDown') {
+                        e.preventDefault();
+                        if (visiblePaletteItems.length > 0) {
+                          setPaletteCursor((prev) => (prev + 1) % visiblePaletteItems.length);
+                        }
+                        return;
+                      }
+
+                      if (e.key === 'ArrowUp') {
+                        e.preventDefault();
+                        if (visiblePaletteItems.length > 0) {
+                          setPaletteCursor((prev) => (prev - 1 + visiblePaletteItems.length) % visiblePaletteItems.length);
+                        }
+                        return;
+                      }
+
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        if (visiblePaletteItems[safePaletteCursor]) {
+                          visiblePaletteItems[safePaletteCursor].action();
+                        }
+                      }
+                    }}
+                    placeholder="Search actions, sessions, settings..."
+                    aria-label="Quick action search"
+                    className="w-full bg-[#0d0d0e] border border-[#262626] rounded-xl px-4 py-3 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-[#ff7a00]/35"
+                  />
+                  <div className="mt-2 text-[10px] text-zinc-500 uppercase tracking-widest">Quick Navigator · Ctrl/Cmd + K</div>
+                </div>
+
+                <div className="max-h-[52vh] overflow-y-auto p-2">
+                  {visiblePaletteItems.length > 0 ? (
+                    <div className="space-y-1">
+                      {visiblePaletteItems.map((item, idx) => (
+                        <button
+                          key={item.id}
+                          onClick={item.action}
+                          className={cn(
+                            'w-full text-left px-3 py-2.5 rounded-lg border transition-colors',
+                            idx === safePaletteCursor
+                              ? 'border-[#ff7a00]/35 bg-[#1a130d]'
+                              : 'border-transparent hover:border-[#2a2a2a] hover:bg-[#181818]'
+                          )}
+                        >
+                          <div className="text-sm text-zinc-200 font-medium">{item.title}</div>
+                          <div className="text-[11px] text-zinc-500">{item.subtitle}</div>
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="px-3 py-8 text-center text-zinc-500 text-sm">No matches found.</div>
+                  )}
+                </div>
+              </motion.div>
+            </>
+          )}
+        </AnimatePresence>
 
         <AnimatePresence>
           {showSettingsPanel && (

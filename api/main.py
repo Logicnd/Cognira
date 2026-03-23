@@ -215,19 +215,18 @@ async def generate_web_fallback_answer(user_query: str, concise: bool = False) -
 
     if concise:
         top = results[0]
-        title = (top.get("title") or "Untitled").strip()
         body = (top.get("body") or "").strip()
         href = (top.get("href") or "").strip()
-        snippet = body[:140] + ("..." if len(body) > 140 else "")
-        parts = [
-            "Cloud AI is unavailable right now.",
-            f"Quick web answer: {title}."
-        ]
+        snippet = re.sub(r"\s+", " ", body)
+        snippet = snippet[:180] + ("..." if len(snippet) > 180 else "")
+
+        if snippet and href:
+            return f"{snippet}\n\nSource: {href}"
         if snippet:
-            parts.append(snippet)
+            return snippet
         if href:
-            parts.append(f"Source: {href}")
-        return "\n".join(parts)
+            return f"Source: {href}"
+        return "I could not generate a concise fallback answer right now."
 
     lines = [
         "I could not reach cloud AI providers, but I found relevant web results:",
@@ -574,23 +573,21 @@ async def chat(request: ChatRequest):
             try:
                 if not use_local_model:
                     selected_cloud_model = normalize_model_name(requested_model)
+                    # Free mode prioritizes higher-quality cloud models first.
                     if selected_cloud_model == "free":
-                        yield f"data: {json.dumps({'status': 'Trying free AI provider...', 'phase': 'cloud'})}\n\n"
-                        free_answer = await generate_free_llm_answer(request.messages)
-                        if free_answer:
-                            save_message(request.session_id, "assistant", free_answer)
-                            free_chunk = json.dumps({"message": {"role": "assistant", "content": free_answer}})
-                            yield f"data: {free_chunk}\n\n"
-                            yield f"data: {json.dumps({'done': True})}\n\n"
-                            return
-                        cloud_failure_reasons.append("free: unavailable or rate-limited")
-
-                    # Secondary cloud attempt: Pollinations for additional resilience.
-                    yield f"data: {json.dumps({'status': 'Contacting cloud model...', 'phase': 'cloud'})}\n\n"
-                    backup_model = "mistral" if payload["model"] != "mistral" else "openai"
-                    attempt_models = [payload["model"]]
-                    if backup_model not in attempt_models:
-                        attempt_models.append(backup_model)
+                        yield f"data: {json.dumps({'status': 'Trying free cloud models...', 'phase': 'cloud'})}\n\n"
+                        attempt_models = ["openai", "mistral"]
+                        if not any(m.get("role") == "system" for m in payload.get("messages", [])):
+                            payload["messages"].insert(0, {
+                                "role": "system",
+                                "content": "You are Cognira. Give a direct, accurate answer first. Avoid unnecessary verbosity."
+                            })
+                    else:
+                        yield f"data: {json.dumps({'status': 'Contacting cloud model...', 'phase': 'cloud'})}\n\n"
+                        backup_model = "mistral" if payload["model"] != "mistral" else "openai"
+                        attempt_models = [payload["model"]]
+                        if backup_model not in attempt_models:
+                            attempt_models.append(backup_model)
 
                     for cloud_model in attempt_models:
                         try:
@@ -623,6 +620,18 @@ async def chat(request: ChatRequest):
                         except Exception as cloud_error:
                             logger.warning(f"Pollinations attempt failed for {cloud_model}: {cloud_error}")
                             cloud_failure_reasons.append(f"{cloud_model}: {cloud_error}")
+
+                    # Tertiary fallback for free mode: Hugging Face inference.
+                    if selected_cloud_model == "free":
+                        yield f"data: {json.dumps({'status': 'Trying backup free provider...', 'phase': 'cloud-attempt'})}\n\n"
+                        free_answer = await generate_free_llm_answer(request.messages)
+                        if free_answer:
+                            save_message(request.session_id, "assistant", free_answer)
+                            free_chunk = json.dumps({"message": {"role": "assistant", "content": free_answer}})
+                            yield f"data: {free_chunk}\n\n"
+                            yield f"data: {json.dumps({'done': True})}\n\n"
+                            return
+                        cloud_failure_reasons.append("hf-free: unavailable or low quality")
 
                     # Fallback to a local model if cloud is unavailable.
                     yield f"data: {json.dumps({'status': 'Cloud unavailable. Checking local runtime...', 'phase': 'local-fallback'})}\n\n"

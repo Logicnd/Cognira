@@ -49,11 +49,15 @@ async def root():
 DB_PATH = "cognira.db"
 
 SUPPORTED_CLOUD_MODELS = [
+    {"name": "free (Cloud)", "provider": "huggingface"},
     {"name": "openai (Cloud)", "provider": "pollinations"},
     {"name": "mistral (Cloud)", "provider": "pollinations"},
 ]
 
 MODEL_ALIASES = {
+    "free": "free",
+    "hf": "free",
+    "huggingface": "free",
     "openai": "openai",
     "gpt-4o-mini": "openai",
     "claude-3-haiku": "openai",
@@ -74,7 +78,7 @@ def prune_empty_sessions(cursor: sqlite3.Cursor):
 
 def normalize_model_name(model_name: str) -> str:
     clean_model = model_name.split(" (")[0].strip().lower()
-    return MODEL_ALIASES.get(clean_model, "openai")
+    return MODEL_ALIASES.get(clean_model, "free")
 
 def should_use_local_model(model_name: str) -> bool:
     return USE_LOCAL or model_name.lower().endswith("(local)")
@@ -104,6 +108,27 @@ async def generate_web_fallback_answer(user_query: str) -> Optional[str]:
 
     if normalized_query in small_talk_replies:
         return small_talk_replies[normalized_query]
+
+    # Fast deterministic fallback for common translation asks.
+    if "russian" in normalized_query:
+        translation_map = {
+            "hi": "Privet",
+            "hello": "Privet",
+            "thank you": "Spasibo",
+            "thanks": "Spasibo",
+            "yes": "Da",
+            "no": "Net"
+        }
+
+        phrase = ""
+        for candidate in translation_map.keys():
+            if candidate in normalized_query:
+                phrase = candidate
+                break
+
+        if phrase:
+            return f"In Russian, '{phrase}' is '{translation_map[phrase]}'."
+        return "I can translate to Russian. Tell me the exact phrase, for example: 'How are you?'"
 
     if normalized_query.endswith("?") and len(normalized_query.split()) <= 4:
         return "I can help with that. Please add one more detail so I can give a precise answer."
@@ -256,8 +281,66 @@ app.add_middleware(
 )
 
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434/api")
-DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "openai") # Pollinations default
+DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "free")
 USE_LOCAL = os.getenv("USE_LOCAL", "false").lower() == "true"
+HF_INFERENCE_MODEL = os.getenv("HF_INFERENCE_MODEL", "TinyLlama/TinyLlama-1.1B-Chat-v1.0")
+HF_API_TOKEN = os.getenv("HF_API_TOKEN", "")
+
+
+def _build_free_prompt(messages: List[Message]) -> str:
+    # Keep a compact prompt to improve latency for free providers.
+    prompt_parts = [
+        "You are Cognira. Give direct, practical, and concise answers.",
+        "If the user asks for translation, return the translated phrase first."
+    ]
+
+    recent = messages[-8:]
+    for msg in recent:
+        role = "User" if msg.role == "user" else "Assistant"
+        prompt_parts.append(f"{role}: {msg.content}")
+    prompt_parts.append("Assistant:")
+    return "\n".join(prompt_parts)
+
+
+async def generate_free_llm_answer(messages: List[Message]) -> Optional[str]:
+    prompt = _build_free_prompt(messages)
+    endpoint = f"https://api-inference.huggingface.co/models/{HF_INFERENCE_MODEL}"
+    headers = {"Content-Type": "application/json"}
+    if HF_API_TOKEN:
+        headers["Authorization"] = f"Bearer {HF_API_TOKEN}"
+
+    payload = {
+        "inputs": prompt,
+        "parameters": {
+            "max_new_tokens": 220,
+            "temperature": 0.25,
+            "return_full_text": False
+        }
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=40.0) as client:
+            response = await client.post(endpoint, headers=headers, json=payload)
+            if response.status_code >= 400:
+                logger.warning(f"HF inference failed with status {response.status_code}: {response.text[:180]}")
+                return None
+
+            data = response.json()
+            if isinstance(data, dict) and data.get("error"):
+                logger.warning(f"HF inference provider error: {data.get('error')}")
+                return None
+
+            if isinstance(data, list) and data:
+                first = data[0]
+                text = ""
+                if isinstance(first, dict):
+                    text = (first.get("generated_text") or first.get("summary_text") or "").strip()
+                if text:
+                    return text
+            return None
+    except Exception as e:
+        logger.warning(f"HF free LLM fallback failed: {e}")
+        return None
 
 class Message(BaseModel):
     role: str
@@ -331,11 +414,12 @@ async def chat(request: ChatRequest):
         url = f"{OLLAMA_URL}/chat"
     else:
         selected_cloud_model = normalize_model_name(requested_model)
+        pollinations_model = selected_cloud_model if selected_cloud_model in {"openai", "mistral"} else "openai"
         
         # Primary: Pollinations AI
         payload = {
             "messages": [m.dict() for m in request.messages],
-            "model": selected_cloud_model,
+            "model": pollinations_model,
             "jsonMode": False
         }
         # Developer Mode Enhancement: Inject System Prompt for more detailed reasoning
@@ -351,9 +435,22 @@ async def chat(request: ChatRequest):
         async with httpx.AsyncClient(timeout=60.0) as client:
             cloud_failure_reasons: List[str] = []
             yield f"data: {json.dumps({'status': 'Thinking...', 'phase': 'init'})}\n\n"
-            # --- PRIMARY ATTEMPT: Pollinations ---
+            # --- PRIMARY ATTEMPT: Free cloud LLM (Hugging Face inference) ---
             try:
                 if not use_local_model:
+                    selected_cloud_model = normalize_model_name(requested_model)
+                    if selected_cloud_model == "free":
+                        yield f"data: {json.dumps({'status': 'Trying free AI provider...', 'phase': 'cloud'})}\n\n"
+                        free_answer = await generate_free_llm_answer(request.messages)
+                        if free_answer:
+                            save_message(request.session_id, "assistant", free_answer)
+                            free_chunk = json.dumps({"message": {"role": "assistant", "content": free_answer}})
+                            yield f"data: {free_chunk}\n\n"
+                            yield f"data: {json.dumps({'done': True})}\n\n"
+                            return
+                        cloud_failure_reasons.append("free: unavailable or rate-limited")
+
+                    # Secondary cloud attempt: Pollinations for additional resilience.
                     yield f"data: {json.dumps({'status': 'Contacting cloud model...', 'phase': 'cloud'})}\n\n"
                     backup_model = "mistral" if payload["model"] != "mistral" else "openai"
                     attempt_models = [payload["model"]]
@@ -456,7 +553,7 @@ async def chat(request: ChatRequest):
             else:
                 cloud_reason = "; ".join(cloud_failure_reasons[-2:]) if cloud_failure_reasons else "no provider details available"
                 error_message = (
-                    "Cloud providers are unavailable right now and no local Ollama model is ready. "
+                    "Free/cloud providers are unavailable right now and no local Ollama model is ready. "
                     "Start Ollama, run 'ollama pull llama3' (or another model), then retry. "
                     f"Details: {cloud_reason}"
                 )

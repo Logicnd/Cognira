@@ -214,7 +214,7 @@ export default function CogniraApp() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [model, setModel] = useState('openai (Cloud)');
+  const [model, setModel] = useState('free (Cloud)');
   const [models, setModels] = useState<ModelOption[]>([]);
   const [stats, setStats] = useState<SystemStats | null>(null);
   const [showSidebar, setShowSidebar] = useState(true);

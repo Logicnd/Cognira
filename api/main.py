@@ -7,6 +7,8 @@ import logging
 import sqlite3
 import socket
 import re
+import ast
+import operator
 from typing import List, Optional
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
@@ -85,6 +87,72 @@ def should_use_local_model(model_name: str) -> bool:
 
 def strip_model_suffix(model_name: str) -> str:
     return model_name.split(" (")[0].strip()
+
+
+_SAFE_MATH_OPERATORS = {
+    ast.Add: operator.add,
+    ast.Sub: operator.sub,
+    ast.Mult: operator.mul,
+    ast.Div: operator.truediv,
+    ast.Mod: operator.mod,
+    ast.Pow: operator.pow,
+}
+
+
+def _safe_eval_math(node: ast.AST) -> float:
+    if isinstance(node, ast.Expression):
+        return _safe_eval_math(node.body)
+    if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+        return float(node.value)
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+        value = _safe_eval_math(node.operand)
+        return value if isinstance(node.op, ast.UAdd) else -value
+    if isinstance(node, ast.BinOp) and type(node.op) in _SAFE_MATH_OPERATORS:
+        left = _safe_eval_math(node.left)
+        right = _safe_eval_math(node.right)
+        if isinstance(node.op, ast.Div) and right == 0:
+            raise ValueError("division by zero")
+        return _SAFE_MATH_OPERATORS[type(node.op)](left, right)
+    raise ValueError("unsupported expression")
+
+
+def generate_fast_answer(user_query: str) -> Optional[str]:
+    if not user_query:
+        return None
+
+    normalized = re.sub(r"\s+", " ", user_query.strip().lower())
+
+    # Keep frequent tiny prompts instant and concise.
+    short_map = {
+        "1+1": "2",
+        "1 + 1": "2",
+        "what is 1+1": "2",
+        "what is 1 + 1": "2",
+        "hi": "Hi.",
+        "hello": "Hello.",
+        "thanks": "You're welcome.",
+        "thank you": "You're welcome.",
+    }
+    if normalized in short_map:
+        return short_map[normalized]
+
+    # Generic arithmetic detector for expressions like:
+    # 3*7, (12 + 8) / 2, what is 14-6?
+    expr_candidate = normalized
+    expr_candidate = re.sub(r"^(what is|calculate|compute)\s+", "", expr_candidate)
+    expr_candidate = expr_candidate.rstrip("?.!")
+
+    if re.fullmatch(r"[0-9\s\+\-\*\/\(\)\.%]+", expr_candidate):
+        try:
+            parsed = ast.parse(expr_candidate, mode="eval")
+            value = _safe_eval_math(parsed)
+            if abs(value - round(value)) < 1e-9:
+                return str(int(round(value)))
+            return f"{value:.6f}".rstrip("0").rstrip(".")
+        except Exception:
+            return None
+
+    return None
 
 
 async def generate_web_fallback_answer(user_query: str) -> Optional[str]:
@@ -432,6 +500,20 @@ async def chat(request: ChatRequest):
         url = "https://text.pollinations.ai/"
 
     async def generate():
+        last_user_query = ""
+        for msg in reversed(request.messages):
+            if msg.role == "user":
+                last_user_query = msg.content
+                break
+
+        fast_answer = generate_fast_answer(last_user_query)
+        if fast_answer:
+            save_message(request.session_id, "assistant", fast_answer)
+            fast_chunk = json.dumps({"message": {"role": "assistant", "content": fast_answer}})
+            yield f"data: {fast_chunk}\n\n"
+            yield f"data: {json.dumps({'done': True})}\n\n"
+            return
+
         async with httpx.AsyncClient(timeout=60.0) as client:
             cloud_failure_reasons: List[str] = []
             yield f"data: {json.dumps({'status': 'Thinking...', 'phase': 'init'})}\n\n"
@@ -560,12 +642,6 @@ async def chat(request: ChatRequest):
 
             # Lightweight web fallback for low-resource environments when AI providers are down.
             yield f"data: {json.dumps({'status': 'Switching to web-assisted fallback...', 'phase': 'web-fallback'})}\n\n"
-            last_user_query = ""
-            for msg in reversed(request.messages):
-                if msg.role == "user":
-                    last_user_query = msg.content
-                    break
-
             web_fallback = await generate_web_fallback_answer(last_user_query)
             if web_fallback:
                 save_message(request.session_id, "assistant", web_fallback)

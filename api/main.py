@@ -155,7 +155,7 @@ def generate_fast_answer(user_query: str) -> Optional[str]:
     return None
 
 
-async def generate_web_fallback_answer(user_query: str) -> Optional[str]:
+async def generate_web_fallback_answer(user_query: str, concise: bool = False) -> Optional[str]:
     if not user_query or DDGS is None:
         return None
 
@@ -212,6 +212,22 @@ async def generate_web_fallback_answer(user_query: str) -> Optional[str]:
 
     if not results:
         return None
+
+    if concise:
+        top = results[0]
+        title = (top.get("title") or "Untitled").strip()
+        body = (top.get("body") or "").strip()
+        href = (top.get("href") or "").strip()
+        snippet = body[:140] + ("..." if len(body) > 140 else "")
+        parts = [
+            "Cloud AI is unavailable right now.",
+            f"Quick web answer: {title}."
+        ]
+        if snippet:
+            parts.append(snippet)
+        if href:
+            parts.append(f"Source: {href}")
+        return "\n".join(parts)
 
     lines = [
         "I could not reach cloud AI providers, but I found relevant web results:",
@@ -419,6 +435,7 @@ class ChatRequest(BaseModel):
     messages: List[Message]
     stream: Optional[bool] = True
     session_id: Optional[str] = "default"
+    concise_mode: Optional[bool] = False
 
 
 class CommandSuggestionRequest(BaseModel):
@@ -642,7 +659,10 @@ async def chat(request: ChatRequest):
 
             # Lightweight web fallback for low-resource environments when AI providers are down.
             yield f"data: {json.dumps({'status': 'Switching to web-assisted fallback...', 'phase': 'web-fallback'})}\n\n"
-            web_fallback = await generate_web_fallback_answer(last_user_query)
+            web_fallback = await generate_web_fallback_answer(
+                last_user_query,
+                concise=bool(request.concise_mode)
+            )
             if web_fallback:
                 save_message(request.session_id, "assistant", web_fallback)
                 web_chunk = json.dumps({"message": {"role": "assistant", "content": web_fallback}})

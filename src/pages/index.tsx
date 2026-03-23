@@ -778,7 +778,8 @@ export default function CogniraApp() {
           model,
           messages: apiMessages,
           stream: true,
-          session_id: sessionId
+          session_id: sessionId,
+          concise_mode: conciseMode
         })
       });
 

@@ -87,10 +87,16 @@ export default function BillingAdminPage() {
     try {
       setBusy(true);
       setError('');
-      await axios.post(`${API_URL}/billing/subscribe`, {
+      const response = await axios.post(`${API_URL}/billing/subscribe`, {
         plan: selectedPlan,
         billing_cycle: selectedCycle
       });
+
+      if (response.data?.status === 'pending_checkout' && response.data?.checkout?.checkout_url) {
+        window.location.href = String(response.data.checkout.checkout_url);
+        return;
+      }
+
       await refresh();
     } catch {
       setError('Plan update failed.');

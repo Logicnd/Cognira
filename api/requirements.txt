@@ -12,3 +12,4 @@ pypdf
 faiss-cpu
 duckduckgo-search
 ddgs
+stripe

@@ -10,6 +10,7 @@
     "dev:lite": "npm run dev:backend",
     "dev:ui:lite": "npm run dev:frontend:lite",
     "health:full": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/full-health-check.ps1",
+    "predeploy:check": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/predeploy-check.ps1",
     "build": "next build",
     "start": "next start",
     "start:lite": "next start -p 3000",

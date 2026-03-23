@@ -12,11 +12,17 @@ import operator
 from abc import ABC, abstractmethod
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta, UTC
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import FastAPI, HTTPException, UploadFile, File, Request, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from dotenv import load_dotenv
+from urllib.parse import urljoin
+
+try:
+    import stripe
+except Exception:
+    stripe = None
 
 try:
     from ddgs import DDGS
@@ -264,6 +270,12 @@ async def get_local_models() -> List[str]:
 def init_db():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
+
+    def ensure_column(table: str, column: str, definition: str):
+        cursor.execute(f"PRAGMA table_info({table})")
+        existing = {row[1] for row in cursor.fetchall()}
+        if column not in existing:
+            cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
     # Messages table with indexing
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS messages (
@@ -312,9 +324,13 @@ def init_db():
             billing_cycle TEXT NOT NULL,
             amount_gbp INTEGER NOT NULL,
             renewal_date TEXT,
+            provider_customer_id TEXT,
+            provider_subscription_id TEXT,
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    ensure_column("subscriptions", "provider_customer_id", "TEXT")
+    ensure_column("subscriptions", "provider_subscription_id", "TEXT")
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS usage_counters (
@@ -634,20 +650,89 @@ class StripeCheckoutProvider(CheckoutProvider):
 
     def __init__(self, secret_key: str):
         self.secret_key = secret_key
+        if stripe is None:
+            raise RuntimeError("Stripe SDK is not installed. Run pip install -r api/requirements.txt.")
+        if self.secret_key:
+            stripe.api_key = self.secret_key
+
+    def _get_price_id(self, plan: str, billing_cycle: str) -> str:
+        price_id = STRIPE_PRICE_IDS.get(plan, {}).get(billing_cycle, "")
+        if not price_id and billing_cycle == "yearly":
+            price_id = STRIPE_PRICE_IDS.get(plan, {}).get("monthly", "")
+        if not price_id:
+            raise RuntimeError(
+                f"Missing Stripe price id for plan={plan}, billing_cycle={billing_cycle}. "
+                "Set STRIPE_PRICE_ID_* environment variables."
+            )
+        return price_id
 
     def create_checkout_session(self, user_id: str, plan: str, billing_cycle: str) -> Dict[str, Any]:
         if not self.secret_key:
             raise RuntimeError("Stripe provider is not configured. Set STRIPE_SECRET_KEY.")
-        raise RuntimeError("Stripe checkout integration is scaffolded but not enabled in this local build.")
+
+        price_id = self._get_price_id(plan, billing_cycle)
+        session = stripe.checkout.Session.create(
+            mode="subscription",
+            line_items=[{"price": price_id, "quantity": 1}],
+            success_url=STRIPE_SUCCESS_URL,
+            cancel_url=STRIPE_CANCEL_URL,
+            metadata={
+                "user_id": user_id,
+                "plan": plan,
+                "billing_cycle": billing_cycle,
+            },
+        )
+        return {
+            "provider": self.name,
+            "checkout_session_id": session.get("id"),
+            "checkout_url": session.get("url"),
+            "mode": "live",
+            "status": session.get("status", "created"),
+            "billing_cycle": billing_cycle,
+        }
 
     def cancel_subscription(self, user_id: str) -> Dict[str, Any]:
         if not self.secret_key:
             raise RuntimeError("Stripe provider is not configured. Set STRIPE_SECRET_KEY.")
-        raise RuntimeError("Stripe cancellation integration is scaffolded but not enabled in this local build.")
+
+        subscription = get_subscription(user_id)
+        provider_subscription_id = (subscription or {}).get("provider_subscription_id")
+        if not provider_subscription_id:
+            raise RuntimeError(
+                "No Stripe subscription id stored for this user yet. "
+                "Complete checkout first (webhook) before cancellation."
+            )
+
+        cancelled = stripe.Subscription.delete(provider_subscription_id)
+        return {
+            "provider": self.name,
+            "cancellation_id": cancelled.get("id"),
+            "mode": "live",
+            "status": cancelled.get("status", "cancelled"),
+        }
 
 
 CHECKOUT_PROVIDER = os.getenv("CHECKOUT_PROVIDER", "mock").strip().lower()
 STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
+STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
+FRONTEND_BASE_URL = os.getenv("FRONTEND_BASE_URL", "http://localhost:3000")
+STRIPE_SUCCESS_URL = os.getenv("STRIPE_SUCCESS_URL", urljoin(FRONTEND_BASE_URL, "/admin/billing?checkout=success"))
+STRIPE_CANCEL_URL = os.getenv("STRIPE_CANCEL_URL", urljoin(FRONTEND_BASE_URL, "/admin/billing?checkout=cancelled"))
+
+STRIPE_PRICE_IDS: Dict[str, Dict[str, str]] = {
+    "plus": {
+        "monthly": os.getenv("STRIPE_PRICE_ID_PLUS_MONTHLY", ""),
+        "yearly": os.getenv("STRIPE_PRICE_ID_PLUS_YEARLY", ""),
+    },
+    "business": {
+        "monthly": os.getenv("STRIPE_PRICE_ID_BUSINESS_MONTHLY", ""),
+        "yearly": os.getenv("STRIPE_PRICE_ID_BUSINESS_YEARLY", ""),
+    },
+    "pro": {
+        "monthly": os.getenv("STRIPE_PRICE_ID_PRO_MONTHLY", ""),
+        "yearly": os.getenv("STRIPE_PRICE_ID_PRO_YEARLY", ""),
+    },
+}
 
 
 def get_checkout_provider() -> CheckoutProvider:
@@ -662,6 +747,7 @@ def get_subscription(user_id: str = "local-user"):
     cursor.execute(
         """
         SELECT plan, status, billing_cycle, amount_gbp, renewal_date, updated_at
+               , provider_customer_id, provider_subscription_id
         FROM subscriptions
         WHERE user_id = ?
         """,
@@ -679,10 +765,18 @@ def get_subscription(user_id: str = "local-user"):
         "amount_gbp": row[3],
         "renewal_date": row[4],
         "updated_at": row[5],
+        "provider_customer_id": row[6],
+        "provider_subscription_id": row[7],
     }
 
 
-def set_subscription(plan: str, billing_cycle: str = "monthly", user_id: str = "local-user"):
+def set_subscription(
+    plan: str,
+    billing_cycle: str = "monthly",
+    user_id: str = "local-user",
+    provider_customer_id: Optional[str] = None,
+    provider_subscription_id: Optional[str] = None,
+):
     normalized_plan = (plan or "").strip().lower()
     if normalized_plan not in PLAN_PRICING_GBP:
         raise ValueError("invalid plan")
@@ -699,17 +793,37 @@ def set_subscription(plan: str, billing_cycle: str = "monthly", user_id: str = "
     cursor = conn.cursor()
     cursor.execute(
         """
-        INSERT INTO subscriptions (user_id, plan, status, billing_cycle, amount_gbp, renewal_date, updated_at)
-        VALUES (?, ?, 'active', ?, ?, ?, CURRENT_TIMESTAMP)
+        INSERT INTO subscriptions (
+            user_id,
+            plan,
+            status,
+            billing_cycle,
+            amount_gbp,
+            renewal_date,
+            provider_customer_id,
+            provider_subscription_id,
+            updated_at
+        )
+        VALUES (?, ?, 'active', ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
         ON CONFLICT(user_id) DO UPDATE SET
             plan=excluded.plan,
             status='active',
             billing_cycle=excluded.billing_cycle,
             amount_gbp=excluded.amount_gbp,
             renewal_date=excluded.renewal_date,
+            provider_customer_id=COALESCE(excluded.provider_customer_id, subscriptions.provider_customer_id),
+            provider_subscription_id=COALESCE(excluded.provider_subscription_id, subscriptions.provider_subscription_id),
             updated_at=CURRENT_TIMESTAMP
         """,
-        (user_id, normalized_plan, normalized_cycle, amount, renewal_date),
+        (
+            user_id,
+            normalized_plan,
+            normalized_cycle,
+            amount,
+            renewal_date,
+            provider_customer_id,
+            provider_subscription_id,
+        ),
     )
     conn.commit()
     conn.close()
@@ -728,6 +842,49 @@ def cancel_subscription(user_id: str = "local-user"):
     )
     conn.commit()
     conn.close()
+
+
+def update_subscription_status(
+    user_id: str,
+    status: str,
+    provider_customer_id: Optional[str] = None,
+    provider_subscription_id: Optional[str] = None,
+):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        UPDATE subscriptions
+        SET
+            status = ?,
+            provider_customer_id = COALESCE(?, provider_customer_id),
+            provider_subscription_id = COALESCE(?, provider_subscription_id),
+            updated_at = CURRENT_TIMESTAMP
+        WHERE user_id = ?
+        """,
+        (status, provider_customer_id, provider_subscription_id, user_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_user_by_provider_customer_id(provider_customer_id: str) -> Optional[str]:
+    if not provider_customer_id:
+        return None
+
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT user_id FROM subscriptions
+        WHERE provider_customer_id = ?
+        LIMIT 1
+        """,
+        (provider_customer_id,),
+    )
+    row = cursor.fetchone()
+    conn.close()
+    return row[0] if row else None
 
 # CORS for frontend integration
 app.add_middleware(
@@ -951,25 +1108,54 @@ async def billing_audit(limit: int = 100):
     return {"events": events}
 
 
+@app.get("/billing/provider")
+async def billing_provider():
+    provider = get_checkout_provider()
+    return {
+        "provider": provider.name,
+        "stripe_sdk_available": stripe is not None,
+        "stripe_configured": bool(STRIPE_SECRET_KEY),
+        "stripe_webhook_configured": bool(STRIPE_WEBHOOK_SECRET),
+    }
+
+
 @app.post("/billing/subscribe")
 async def billing_subscribe(request: SubscriptionUpdateRequest):
     previous_subscription = get_subscription()
     previous_plan = previous_subscription["plan"] if previous_subscription else None
     provider = get_checkout_provider()
 
+    normalized_cycle = "yearly" if (request.billing_cycle or "").strip().lower() == "yearly" else "monthly"
+
     try:
         checkout_result = provider.create_checkout_session(
             user_id="local-user",
             plan=request.plan,
-            billing_cycle=request.billing_cycle or "monthly",
+            billing_cycle=normalized_cycle,
         )
-        set_subscription(request.plan, request.billing_cycle or "monthly")
+
+        if provider.name == "stripe":
+            log_billing_event(
+                event_type="checkout_session_created",
+                old_plan=previous_plan,
+                new_plan=request.plan,
+                billing_cycle=normalized_cycle,
+                provider=provider.name,
+                details={"checkout": checkout_result},
+            )
+            return {
+                "status": "pending_checkout",
+                "provider": provider.name,
+                "checkout": checkout_result,
+            }
+
+        set_subscription(request.plan, normalized_cycle)
         updated_subscription = get_subscription()
         log_billing_event(
             event_type="plan_changed",
             old_plan=previous_plan,
             new_plan=updated_subscription["plan"] if updated_subscription else request.plan,
-            billing_cycle=updated_subscription["billing_cycle"] if updated_subscription else (request.billing_cycle or "monthly"),
+            billing_cycle=updated_subscription["billing_cycle"] if updated_subscription else normalized_cycle,
             provider=provider.name,
             details={"checkout": checkout_result},
         )
@@ -1003,6 +1189,94 @@ async def billing_cancel():
         details={"cancellation": cancellation},
     )
     return {"status": "cancelled", "subscription": subscription, "provider": provider.name}
+
+
+@app.post("/billing/webhook/stripe")
+async def billing_stripe_webhook(
+    request: Request,
+    stripe_signature: Optional[str] = Header(default=None, alias="Stripe-Signature"),
+):
+    if stripe is None:
+        raise HTTPException(status_code=400, detail="Stripe SDK is not installed.")
+
+    if not STRIPE_WEBHOOK_SECRET:
+        raise HTTPException(status_code=400, detail="Stripe webhook is not configured. Set STRIPE_WEBHOOK_SECRET.")
+
+    payload = await request.body()
+    try:
+        event = stripe.Webhook.construct_event(payload=payload, sig_header=stripe_signature, secret=STRIPE_WEBHOOK_SECRET)
+    except Exception as webhook_error:
+        logger.warning(f"Stripe webhook signature validation failed: {webhook_error}")
+        raise HTTPException(status_code=400, detail="Invalid Stripe webhook signature")
+
+    event_type = event.get("type", "unknown")
+    data_object = (event.get("data") or {}).get("object", {})
+
+    if event_type == "checkout.session.completed":
+        metadata = data_object.get("metadata") or {}
+        user_id = metadata.get("user_id", "local-user")
+        plan = (metadata.get("plan") or "plus").lower()
+        billing_cycle = (metadata.get("billing_cycle") or "monthly").lower()
+        provider_customer_id = data_object.get("customer")
+        provider_subscription_id = data_object.get("subscription")
+
+        try:
+            set_subscription(
+                plan=plan,
+                billing_cycle=billing_cycle,
+                user_id=user_id,
+                provider_customer_id=provider_customer_id,
+                provider_subscription_id=provider_subscription_id,
+            )
+            log_billing_event(
+                event_type="stripe_checkout_completed",
+                old_plan=None,
+                new_plan=plan,
+                billing_cycle=billing_cycle,
+                provider="stripe",
+                details={
+                    "event_id": event.get("id"),
+                    "checkout_session_id": data_object.get("id"),
+                    "provider_customer_id": provider_customer_id,
+                    "provider_subscription_id": provider_subscription_id,
+                },
+                user_id=user_id,
+            )
+        except Exception as apply_error:
+            logger.error(f"Failed to apply stripe checkout completion: {apply_error}")
+            raise HTTPException(status_code=500, detail="Failed to apply checkout completion")
+
+    elif event_type in {"customer.subscription.deleted", "customer.subscription.updated"}:
+        provider_customer_id = data_object.get("customer")
+        provider_subscription_id = data_object.get("id")
+        status = (data_object.get("status") or "cancelled").lower()
+        user_id = get_user_by_provider_customer_id(provider_customer_id) or "local-user"
+
+        normalized_status = "cancelled" if status in {"canceled", "cancelled", "unpaid"} else status
+        update_subscription_status(
+            user_id=user_id,
+            status=normalized_status,
+            provider_customer_id=provider_customer_id,
+            provider_subscription_id=provider_subscription_id,
+        )
+        log_billing_event(
+            event_type="stripe_subscription_status_updated",
+            old_plan=None,
+            new_plan=(get_subscription(user_id) or {}).get("plan"),
+            billing_cycle=(get_subscription(user_id) or {}).get("billing_cycle"),
+            provider="stripe",
+            details={
+                "event_id": event.get("id"),
+                "provider_customer_id": provider_customer_id,
+                "provider_subscription_id": provider_subscription_id,
+                "status": normalized_status,
+            },
+            user_id=user_id,
+        )
+    else:
+        logger.info(f"Stripe webhook ignored event type: {event_type}")
+
+    return {"received": True, "event_type": event_type}
 
 @app.post("/chat")
 async def chat(request: ChatRequest):

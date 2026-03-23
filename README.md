@@ -43,6 +43,11 @@ Cognira is a high-performance, private, and cost-free alternative to cloud-based
    npm run health:full
    ```
 
+6. **Run predeploy parity check**:
+   ```bash
+   npm run predeploy:check
+   ```
+
 ## Environment Variables
 
 Use `.env` for local development. A committed `.env.example` template is included for deployment and CI setup.
@@ -59,11 +64,30 @@ Use `.env` for local development. A committed `.env.example` template is include
 - `DEFAULT_MODEL`
 - `CHECKOUT_PROVIDER`
 - `STRIPE_SECRET_KEY` (only needed when using `CHECKOUT_PROVIDER=stripe`)
+- `STRIPE_WEBHOOK_SECRET` (required for Stripe webhook verification)
+- `FRONTEND_BASE_URL`
+- `STRIPE_SUCCESS_URL`
+- `STRIPE_CANCEL_URL`
+- `STRIPE_PRICE_ID_PLUS_MONTHLY`
+- `STRIPE_PRICE_ID_BUSINESS_MONTHLY`
+- `STRIPE_PRICE_ID_PRO_MONTHLY`
 - `HF_API_TOKEN` (optional)
 
 ### Vercel redeploy
 
 When deploying to Vercel, copy the same keys from `.env.example` into Vercel Project Settings -> Environment Variables for each target environment (Preview/Production).
+
+### Stripe webhook endpoint
+
+When `CHECKOUT_PROVIDER=stripe`, configure your Stripe webhook endpoint to:
+
+- `POST /billing/webhook/stripe`
+
+For local testing, this is usually:
+
+- `http://localhost:8000/billing/webhook/stripe`
+
+In production, use your deployed backend URL and set `STRIPE_WEBHOOK_SECRET` from Stripe.
 
 ## Architecture
 

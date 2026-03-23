@@ -674,6 +674,13 @@ export default function CogniraApp() {
         plan,
         billing_cycle: billingCycle
       });
+
+      if (response.data?.status === 'pending_checkout' && response.data?.checkout?.checkout_url) {
+        appendAssistantNotice('Redirecting to Stripe checkout...');
+        window.location.href = String(response.data.checkout.checkout_url);
+        return;
+      }
+
       const nextSubscription = (response.data?.subscription || null) as BillingSubscription | null;
       setSubscription(nextSubscription);
       setShowUpgradeModal(false);

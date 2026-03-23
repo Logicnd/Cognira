@@ -5,8 +5,8 @@
   "scripts": {
     "dev": "concurrently \"npm run dev:frontend\" \"npm run dev:backend\"",
     "dev:frontend": "next dev",
-    "dev:frontend:lite": "next dev --webpack -p 3000",
-    "dev:backend": "venv\\Scripts\\python api/main.py",
+    "dev:frontend:lite": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-frontend-lite.ps1",
+    "dev:backend": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-backend.ps1",
     "dev:lite": "npm run dev:backend",
     "dev:ui:lite": "npm run dev:frontend:lite",
     "build": "next build",

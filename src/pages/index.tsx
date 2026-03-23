@@ -33,9 +33,6 @@ import {
   Upload,
   Gauge,
   TerminalSquare,
-  SlidersHorizontal,
-  Wrench,
-  BookMarked,
   X,
   Save
 } from 'lucide-react';
@@ -80,9 +77,9 @@ interface CitationItem {
   snippet: string;
 }
 
-interface CommandSuggestion {
-  label: string;
+interface SlashCommandDefinition {
   command: string;
+  description: string;
 }
 
 type DensityMode = 'comfortable' | 'compact';
@@ -229,13 +226,8 @@ export default function CogniraApp() {
   const [pinnedPrompts, setPinnedPrompts] = useState<string[]>(DEFAULT_PINNED_PROMPTS);
   const [attachedFiles, setAttachedFiles] = useState<UploadedFileItem[]>([]);
   const [citations, setCitations] = useState<CitationItem[]>([]);
-  const [commandSuggestions, setCommandSuggestions] = useState<CommandSuggestion[]>([]);
-  const [commandOutput, setCommandOutput] = useState('');
-  const [showUtilityDock, setShowUtilityDock] = useState(false);
-  const [utilityTab, setUtilityTab] = useState<'context' | 'tools' | 'sources'>('context');
   const [showSettingsPanel, setShowSettingsPanel] = useState(false);
   const [densityMode, setDensityMode] = useState<DensityMode>('comfortable');
-  const [autoOpenDock, setAutoOpenDock] = useState(true);
   const [showTopThinkingBadge, setShowTopThinkingBadge] = useState(true);
   const [showSystemHealthCard, setShowSystemHealthCard] = useState(true);
   const [editingMessageIndex, setEditingMessageIndex] = useState<number | null>(null);
@@ -317,9 +309,7 @@ export default function CogniraApp() {
       const storedPersonaId = localStorage.getItem('cognira_persona_selected');
       const storedReusablePrompt = localStorage.getItem('cognira_reusable_prompt');
       const storedPinned = localStorage.getItem('cognira_pinned_prompts');
-      const storedUtilityTab = localStorage.getItem('cognira_utility_tab');
       const storedDensity = localStorage.getItem('cognira_density_mode');
-      const storedAutoOpenDock = localStorage.getItem('cognira_auto_open_dock');
       const storedTopThinkingBadge = localStorage.getItem('cognira_show_top_thinking_badge');
       const storedSystemHealthCard = localStorage.getItem('cognira_show_system_health_card');
       if (storedDevMode !== null) setDevMode(storedDevMode === 'true');
@@ -330,11 +320,7 @@ export default function CogniraApp() {
       if (storedPersonaId) setSelectedPersonaId(storedPersonaId);
       if (storedReusablePrompt) setReusableSystemPrompt(storedReusablePrompt);
       if (storedPinned) setPinnedPrompts(JSON.parse(storedPinned) as string[]);
-      if (storedUtilityTab === 'context' || storedUtilityTab === 'tools' || storedUtilityTab === 'sources') {
-        setUtilityTab(storedUtilityTab);
-      }
       if (storedDensity === 'compact' || storedDensity === 'comfortable') setDensityMode(storedDensity);
-      if (storedAutoOpenDock !== null) setAutoOpenDock(storedAutoOpenDock === 'true');
       if (storedTopThinkingBadge !== null) setShowTopThinkingBadge(storedTopThinkingBadge === 'true');
       if (storedSystemHealthCard !== null) setShowSystemHealthCard(storedSystemHealthCard === 'true');
     } catch (error) {
@@ -352,21 +338,13 @@ export default function CogniraApp() {
       localStorage.setItem('cognira_persona_selected', selectedPersonaId);
       localStorage.setItem('cognira_reusable_prompt', reusableSystemPrompt);
       localStorage.setItem('cognira_pinned_prompts', JSON.stringify(pinnedPrompts));
-      localStorage.setItem('cognira_utility_tab', utilityTab);
       localStorage.setItem('cognira_density_mode', densityMode);
-      localStorage.setItem('cognira_auto_open_dock', String(autoOpenDock));
       localStorage.setItem('cognira_show_top_thinking_badge', String(showTopThinkingBadge));
       localStorage.setItem('cognira_show_system_health_card', String(showSystemHealthCard));
     } catch (error) {
       console.error('Failed to save mode preferences', error);
     }
-  }, [devMode, webAssistMode, conciseMode, performanceMode, personas, selectedPersonaId, reusableSystemPrompt, pinnedPrompts, utilityTab, densityMode, autoOpenDock, showTopThinkingBadge, showSystemHealthCard]);
-
-  useEffect(() => {
-    if (autoOpenDock && (pinnedPrompts.length > 0 || attachedFiles.length > 0 || citations.length > 0 || commandSuggestions.length > 0 || commandOutput)) {
-      setShowUtilityDock(true);
-    }
-  }, [autoOpenDock, pinnedPrompts, attachedFiles, citations, commandSuggestions, commandOutput]);
+  }, [devMode, webAssistMode, conciseMode, performanceMode, personas, selectedPersonaId, reusableSystemPrompt, pinnedPrompts, densityMode, showTopThinkingBadge, showSystemHealthCard]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -497,11 +475,130 @@ export default function CogniraApp() {
     fetchSessions();
   }, [sessionId]);
 
+  const appendAssistantNotice = (content: string) => {
+    setMessages((prev) => [...prev, { role: 'assistant', content }]);
+  };
+
+  const executeSlashCommand = async (rawInput: string): Promise<boolean> => {
+    const trimmed = rawInput.trim();
+    if (!trimmed.startsWith('/')) {
+      return false;
+    }
+
+    const [rawCommand, ...parts] = trimmed.split(/\s+/);
+    const command = rawCommand.toLowerCase();
+    const arg = parts.join(' ').trim();
+
+    const setBooleanWithNotice = (
+      label: string,
+      setter: React.Dispatch<React.SetStateAction<boolean>>
+    ) => {
+      let nextValue = false;
+      setter((current) => {
+        nextValue = !current;
+        return nextValue;
+      });
+      appendAssistantNotice(`${label} ${nextValue ? 'enabled' : 'disabled'}.`);
+    };
+
+    if (command === '/help') {
+      appendAssistantNotice(
+        [
+          'Available slash commands:',
+          '- `/new` start a new chat session',
+          '- `/clear` clear history for the current session',
+          '- `/dev` toggle developer mode',
+          '- `/web` toggle web assist fallback',
+          '- `/concise` toggle concise replies',
+          '- `/perf` toggle performance mode',
+          '- `/persona <balanced|developer|teacher>` switch persona',
+          '- `/prompt <text>` set reusable system prompt',
+          '- `/files` open file picker'
+        ].join('\n')
+      );
+      return true;
+    }
+
+    if (command === '/new') {
+      handleNewChat();
+      appendAssistantNotice('Started a new chat session.');
+      return true;
+    }
+
+    if (command === '/clear') {
+      await handleClearHistory();
+      appendAssistantNotice('Cleared history for this session.');
+      return true;
+    }
+
+    if (command === '/dev') {
+      setBooleanWithNotice('Developer mode', setDevMode);
+      return true;
+    }
+
+    if (command === '/web') {
+      setBooleanWithNotice('Web assist mode', setWebAssistMode);
+      return true;
+    }
+
+    if (command === '/concise') {
+      setBooleanWithNotice('Concise mode', setConciseMode);
+      return true;
+    }
+
+    if (command === '/perf') {
+      setBooleanWithNotice('Performance mode', setPerformanceMode);
+      return true;
+    }
+
+    if (command === '/persona') {
+      const normalizedArg = arg.toLowerCase();
+      const matchedPersona = personas.find(
+        (persona) => persona.id.toLowerCase() === normalizedArg || persona.name.toLowerCase() === normalizedArg
+      );
+
+      if (!matchedPersona) {
+        appendAssistantNotice('Persona not found. Use `/persona balanced`, `/persona developer`, or `/persona teacher`.');
+        return true;
+      }
+
+      setSelectedPersonaId(matchedPersona.id);
+      appendAssistantNotice(`Persona set to ${matchedPersona.name}.`);
+      return true;
+    }
+
+    if (command === '/prompt') {
+      if (!arg) {
+        appendAssistantNotice('Usage: `/prompt <text>`');
+        return true;
+      }
+
+      setReusableSystemPrompt(arg);
+      appendAssistantNotice('Reusable system prompt updated.');
+      return true;
+    }
+
+    if (command === '/files') {
+      fileInputRef.current?.click();
+      appendAssistantNotice('File picker opened.');
+      return true;
+    }
+
+    appendAssistantNotice('Unknown command. Use `/help` to see available commands.');
+    return true;
+  };
+
   const handleSendMessage = async (overrideInput?: string, baseMessages?: Message[]) => {
     if (isLoading) return;
 
     const trimmedInput = (overrideInput ?? input).trim();
     if (!trimmedInput) return;
+
+    if (await executeSlashCommand(trimmedInput)) {
+      setInput('');
+      return;
+    }
+
     const userMessage: Message = { role: 'user', content: trimmedInput };
     const assistantMessage: Message = { role: 'assistant', content: '' };
     const sourceMessages = baseMessages ?? messages;
@@ -556,13 +653,6 @@ export default function CogniraApp() {
     setCitations(requestCitations);
 
     try {
-      try {
-        const suggestionResponse = await axios.post(`${API_URL}/tools/suggest-command`, { query: trimmedInput });
-        setCommandSuggestions((suggestionResponse.data?.suggestions || []) as CommandSuggestion[]);
-      } catch (suggestError) {
-        console.error('Failed to get command suggestions', suggestError);
-      }
-
       const response = await fetch(`${API_URL}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -772,16 +862,20 @@ export default function CogniraApp() {
       });
       const stdout = response.data?.stdout || '';
       const stderr = response.data?.stderr || '';
-      setCommandOutput([stdout, stderr].filter(Boolean).join('\n').trim() || 'Command completed with no output.');
+      const output = [stdout, stderr].filter(Boolean).join('\n').trim();
+      appendAssistantNotice(
+        output
+          ? ['Command output:', '```', output, '```'].join('\n')
+          : 'Command completed with no output.'
+      );
     } catch (error) {
       console.error('Failed to run suggested command', error);
-      setCommandOutput('Command failed to execute.');
+      appendAssistantNotice('Command failed to execute.');
     }
   };
 
   const resetUiSettings = () => {
     setDensityMode('comfortable');
-    setAutoOpenDock(true);
     setShowTopThinkingBadge(true);
     setShowSystemHealthCard(true);
     setPerformanceMode(LOW_RESOURCE_MODE);
@@ -790,11 +884,9 @@ export default function CogniraApp() {
   const exportUiSettings = async () => {
     const payload = {
       densityMode,
-      autoOpenDock,
       showTopThinkingBadge,
       showSystemHealthCard,
       performanceMode,
-      utilityTab,
       selectedPersonaId,
       reusableSystemPrompt
     };
@@ -880,6 +972,23 @@ export default function CogniraApp() {
     ? messages.slice(-80)
     : messages;
   const renderedOffset = messages.length - renderedMessages.length;
+  const slashCommandDefinitions: SlashCommandDefinition[] = [
+    { command: '/help', description: 'Show all slash commands' },
+    { command: '/new', description: 'Start a fresh chat session' },
+    { command: '/clear', description: 'Clear current session history' },
+    { command: '/dev', description: 'Toggle developer mode' },
+    { command: '/web', description: 'Toggle web assist mode' },
+    { command: '/concise', description: 'Toggle concise responses' },
+    { command: '/perf', description: 'Toggle performance mode' },
+    { command: '/persona', description: 'Set persona (balanced/developer/teacher)' },
+    { command: '/prompt', description: 'Set reusable system prompt' },
+    { command: '/files', description: 'Open file picker' }
+  ];
+  const isSlashMode = input.trimStart().startsWith('/');
+  const slashFilter = input.trim().toLowerCase();
+  const visibleSlashCommands = isSlashMode
+    ? slashCommandDefinitions.filter((item) => item.command.startsWith(slashFilter || '/'))
+    : [];
 
   return (
     <div className="flex h-screen bg-[#000000] text-zinc-100 font-sans overflow-hidden">
@@ -1443,7 +1552,7 @@ export default function CogniraApp() {
                     handleNewChat();
                   }
                 }}
-                placeholder="Ask Cognira..."
+                placeholder="Ask Cognira... (type / for commands)"
                 className="w-full bg-transparent p-5 pl-16 pr-32 min-h-[60px] max-h-48 overflow-y-auto text-zinc-200 placeholder-zinc-700 focus:outline-none resize-none text-sm font-medium"
                 rows={1}
               />
@@ -1502,137 +1611,51 @@ export default function CogniraApp() {
               )}
             </div>
 
-            <div className="mt-2 space-y-2">
-              <div className="flex items-center justify-between">
-                <button
-                  onClick={() => setShowUtilityDock((v) => !v)}
-                  className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md border border-[#2a2a2a] bg-[#101010] text-zinc-400 hover:text-zinc-200 text-[10px] uppercase tracking-widest"
-                >
-                  <SlidersHorizontal size={12} /> Utility Dock
-                </button>
-                <div className="text-[10px] text-zinc-600 uppercase tracking-widest">
-                  {showUtilityDock ? 'Expanded' : 'Collapsed'}
+            {isSlashMode && (
+              <div className="mt-2 rounded-xl border border-[#2a2a2a] bg-[#0f0f0f] p-2">
+                <div className="text-[10px] uppercase tracking-widest text-zinc-500 mb-1">Slash Commands</div>
+                <div className="space-y-1">
+                  {visibleSlashCommands.length > 0 ? (
+                    visibleSlashCommands.map((item) => (
+                      <button
+                        key={item.command}
+                        onClick={() => setInput(`${item.command} `)}
+                        className="w-full text-left px-2.5 py-2 rounded-md hover:bg-[#181818] border border-transparent hover:border-[#252525] transition-colors"
+                      >
+                        <div className="text-[11px] text-zinc-200 font-semibold">{item.command}</div>
+                        <div className="text-[10px] text-zinc-500">{item.description}</div>
+                      </button>
+                    ))
+                  ) : (
+                    <div className="px-2 py-2 text-[11px] text-zinc-500">No commands found. Try `/help`.</div>
+                  )}
                 </div>
               </div>
+            )}
 
-              {showUtilityDock && (
-                <div className="rounded-xl border border-[#2a2a2a] bg-[#0f0f0f] p-2 sm:p-3 space-y-2">
-                  <div className="grid grid-cols-3 gap-1">
-                    <button
-                      onClick={() => setUtilityTab('context')}
-                      className={cn(
-                        'py-1.5 rounded-md text-[10px] uppercase tracking-widest border transition-colors',
-                        utilityTab === 'context' ? 'border-[#3a3a3a] bg-[#181818] text-zinc-200' : 'border-[#2a2a2a] text-zinc-500'
-                      )}
-                    >
-                      Context
-                    </button>
-                    <button
-                      onClick={() => setUtilityTab('tools')}
-                      className={cn(
-                        'py-1.5 rounded-md text-[10px] uppercase tracking-widest border transition-colors flex items-center justify-center gap-1',
-                        utilityTab === 'tools' ? 'border-[#3a3a3a] bg-[#181818] text-zinc-200' : 'border-[#2a2a2a] text-zinc-500'
-                      )}
-                    >
-                      <Wrench size={11} /> Tools
-                    </button>
-                    <button
-                      onClick={() => setUtilityTab('sources')}
-                      className={cn(
-                        'py-1.5 rounded-md text-[10px] uppercase tracking-widest border transition-colors flex items-center justify-center gap-1',
-                        utilityTab === 'sources' ? 'border-[#3a3a3a] bg-[#181818] text-zinc-200' : 'border-[#2a2a2a] text-zinc-500'
-                      )}
-                    >
-                      <BookMarked size={11} /> Sources
-                    </button>
-                  </div>
-
-                  {utilityTab === 'context' && (
-                    <div className="space-y-2">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <select
-                          value={selectedPersonaId}
-                          onChange={(e) => setSelectedPersonaId(e.target.value)}
-                          className="bg-[#111111] border border-[#2a2a2a] rounded-lg px-2 py-1 text-[11px] text-zinc-300"
-                        >
-                          {personas.map((persona) => (
-                            <option key={persona.id} value={persona.id}>{persona.name}</option>
-                          ))}
-                        </select>
-                        <input
-                          value={reusableSystemPrompt}
-                          onChange={(e) => setReusableSystemPrompt(e.target.value)}
-                          placeholder="Reusable system prompt"
-                          className="flex-1 min-w-[180px] bg-[#111111] border border-[#2a2a2a] rounded-lg px-3 py-1.5 text-[11px] text-zinc-300 placeholder-zinc-600"
-                        />
-                      </div>
-                      {pinnedPrompts.length > 0 && (
-                        <div className="flex flex-wrap gap-2">
-                          {pinnedPrompts.slice(0, 6).map((prompt) => (
-                            <button
-                              key={prompt}
-                              onClick={() => setInput(prompt)}
-                              className="px-2.5 py-1 rounded-full text-[10px] bg-[#111111] border border-[#2a2a2a] text-zinc-400 hover:text-white hover:border-zinc-600"
-                            >
-                              {prompt.length > 45 ? `${prompt.slice(0, 45)}...` : prompt}
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {utilityTab === 'tools' && (
-                    <div className="space-y-2">
-                      {commandSuggestions.length > 0 ? (
-                        <div className="flex flex-wrap gap-2">
-                          {commandSuggestions.slice(0, 4).map((suggestion) => (
-                            <button
-                              key={suggestion.command}
-                              onClick={() => runSuggestedCommand(suggestion.command)}
-                              className="px-2 py-1 rounded-md text-[10px] bg-[#101010] border border-[#2a2a2a] text-zinc-300 hover:bg-[#1a1a1a] flex items-center gap-1"
-                            >
-                              <TerminalSquare size={12} /> {suggestion.label}
-                            </button>
-                          ))}
-                        </div>
-                      ) : (
-                        <div className="text-[11px] text-zinc-500">Send a prompt to get command suggestions.</div>
-                      )}
-                      {commandOutput && (
-                        <pre className="text-[10px] mt-1 bg-[#0c0c0c] border border-[#2a2a2a] rounded-lg p-2 max-h-24 overflow-auto text-zinc-400 whitespace-pre-wrap">{commandOutput}</pre>
-                      )}
-                    </div>
-                  )}
-
-                  {utilityTab === 'sources' && (
-                    <div className="space-y-2">
-                      {attachedFiles.length > 0 && (
-                        <div className="flex flex-wrap gap-2">
-                          {attachedFiles.slice(0, 6).map((file) => (
-                            <span key={`${file.filename}-${file.path || ''}`} className="px-2 py-1 rounded-md text-[10px] bg-[#0f141f] border border-[#273249] text-sky-300">
-                              {file.filename}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                      {citations.length > 0 ? (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                          {citations.slice(0, 4).map((citation, idx) => (
-                            <div key={`${citation.filename}-${citation.chunk}-${idx}`} className="p-2 rounded-lg border border-[#2a2a2a] bg-[#101010]">
-                              <div className="text-[10px] text-zinc-500 mb-1">{citation.filename} · chunk {citation.chunk}</div>
-                              <div className="text-[11px] text-zinc-300 line-clamp-3">{citation.snippet}</div>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <div className="text-[11px] text-zinc-500">Attach files and ask a question to see source previews.</div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
+            {(pinnedPrompts.length > 0 || attachedFiles.length > 0 || citations.length > 0) && (
+              <div className="mt-2 flex flex-wrap items-center gap-2 px-1">
+                {pinnedPrompts.slice(0, 3).map((prompt) => (
+                  <button
+                    key={prompt}
+                    onClick={() => setInput(prompt)}
+                    className="px-2.5 py-1 rounded-full text-[10px] bg-[#111111] border border-[#2a2a2a] text-zinc-400 hover:text-white hover:border-zinc-600"
+                  >
+                    {prompt.length > 40 ? `${prompt.slice(0, 40)}...` : prompt}
+                  </button>
+                ))}
+                {attachedFiles.slice(0, 2).map((file) => (
+                  <span key={`${file.filename}-${file.path || ''}`} className="px-2 py-1 rounded-full text-[10px] bg-[#0f141f] border border-[#273249] text-sky-300">
+                    {file.filename}
+                  </span>
+                ))}
+                {citations.slice(0, 1).map((citation, idx) => (
+                  <span key={`${citation.filename}-${citation.chunk}-${idx}`} className="px-2 py-1 rounded-full text-[10px] bg-[#131313] border border-[#2a2a2a] text-zinc-400">
+                    Source: {citation.filename} · chunk {citation.chunk}
+                  </span>
+                ))}
+              </div>
+            )}
 
             <div className="mt-4 flex items-center justify-center gap-6 text-[10px] font-bold text-zinc-700 uppercase tracking-widest">
               <div className="flex items-center gap-1.5">
@@ -1698,8 +1721,8 @@ export default function CogniraApp() {
                           </select>
                         </div>
                         <label className="flex items-center justify-between text-sm text-zinc-300">
-                          <span>Auto-open utility dock</span>
-                          <input type="checkbox" checked={autoOpenDock} onChange={(e) => setAutoOpenDock(e.target.checked)} />
+                          <span>Slash commands in composer</span>
+                          <span className="text-[11px] text-emerald-400 font-medium">Enabled</span>
                         </label>
                         <label className="flex items-center justify-between text-sm text-zinc-300">
                           <span>Show top thinking badge</span>

@@ -238,8 +238,8 @@ export default function CogniraApp() {
   const [citations, setCitations] = useState<CitationItem[]>([]);
   const [showSettingsPanel, setShowSettingsPanel] = useState(false);
   const [densityMode, setDensityMode] = useState<DensityMode>('comfortable');
-  const [showTopThinkingBadge, setShowTopThinkingBadge] = useState(true);
-  const [showSystemHealthCard, setShowSystemHealthCard] = useState(true);
+  const [showTopThinkingBadge, setShowTopThinkingBadge] = useState(false);
+  const [showSystemHealthCard, setShowSystemHealthCard] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [paletteQuery, setPaletteQuery] = useState('');
   const [paletteCursor, setPaletteCursor] = useState(0);
@@ -1117,6 +1117,7 @@ export default function CogniraApp() {
     conciseMode ? 'Concise' : null,
     performanceMode ? 'Performance' : null
   ].filter(Boolean) as string[];
+  const minimalUi = true;
 
   const closePalette = () => {
     setShowCommandPalette(false);
@@ -1327,14 +1328,14 @@ export default function CogniraApp() {
   const hasDraft = input.trim().length > 0;
 
   return (
-    <div className="flex h-screen bg-[#000000] text-zinc-100 font-sans overflow-hidden">
+    <div className="flex h-screen bg-[#212121] text-zinc-100 font-sans overflow-hidden">
       <Head>
         <title>Cognira | Local AI Intelligence</title>
       </Head>
 
       {/* Developer Mode Banner */}
       <AnimatePresence>
-        {devMode && (
+        {devMode && !minimalUi && (
           <motion.div 
             initial={shouldReduceMotion ? false : { height: 0, opacity: 0 }}
             animate={{ height: 28, opacity: 1 }}
@@ -1356,7 +1357,7 @@ export default function CogniraApp() {
             exit={shouldReduceMotion ? { opacity: 0 } : { width: 0, opacity: 0 }}
             transition={shouldReduceMotion ? { duration: 0 } : { duration: 0.24 }}
             className={cn(
-              "flex flex-col border-r border-[#2a2a2a] bg-[#111111] z-20 transition-all duration-300",
+              "flex flex-col border-r border-[#303030] bg-[#171717] z-20 transition-all duration-300",
               devMode && "pt-[28px]"
             )}
           >
@@ -1452,7 +1453,7 @@ export default function CogniraApp() {
               </div>
 
               {/* System Stats */}
-              {showSystemHealthCard && (
+              {!minimalUi && showSystemHealthCard && (
               <div className="space-y-3 px-2 pt-4 border-t border-[#2a2a2a]/50">
                 <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest flex items-center gap-2">
                   <Activity size={10} /> System Health
@@ -1475,6 +1476,7 @@ export default function CogniraApp() {
               )}
             </div>
 
+            {!minimalUi && (
             <div className="p-4 border-t border-[#2a2a2a] flex flex-col gap-3 bg-[#0d0d0d]">
               <div className="flex items-center justify-between px-1">
                 <span className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest">Developer Mode</span>
@@ -1499,18 +1501,19 @@ export default function CogniraApp() {
                 {stats?.ollama_connected ? "LOCAL_READY" : "CLOUD_ACTIVE"}
               </div>
             </div>
+            )}
           </motion.div>
         )}
       </AnimatePresence>
 
       {/* Main Content */}
       <div className={cn(
-        "flex-1 flex flex-col relative bg-[#000000] transition-all duration-300",
+        "flex-1 flex flex-col relative bg-[#212121] transition-all duration-300",
         devMode && "pt-[28px]",
         densityMode === 'compact' && 'text-[95%]'
       )}>
         {/* Top Header */}
-        <header className="h-14 border-b border-[#2a2a2a] flex items-center justify-between px-6 bg-black/80 backdrop-blur-xl sticky top-0 z-10">
+        <header className="h-14 border-b border-[#303030] flex items-center justify-between px-4 sm:px-6 bg-[#212121]/95 backdrop-blur sticky top-0 z-10">
           <div className="flex items-center gap-4">
             <button 
               onClick={() => setShowSidebar(!showSidebar)}
@@ -1519,17 +1522,11 @@ export default function CogniraApp() {
             >
               <ChevronRight className={cn("transition-transform duration-300", showSidebar && "rotate-180")} size={18} />
             </button>
-            <div className="flex items-center gap-2 text-[10px] font-bold text-zinc-600 uppercase tracking-[0.2em]">
-              <Info size={12} />
-              <span>Cognira V1.0</span>
+            <div className="flex items-center gap-2 text-[11px] font-medium text-zinc-400">
+              <Info size={12} className="text-zinc-500" />
+              <span className="max-w-[220px] truncate">{currentSessionTitle}</span>
             </div>
-            <div className="hidden lg:flex items-center gap-1 text-[10px] uppercase tracking-widest text-zinc-600">
-              <span>Chat</span>
-              <span className="text-zinc-800">/</span>
-              <span className="max-w-[160px] truncate text-zinc-400">{currentSessionTitle}</span>
-              <span className="text-zinc-800">/</span>
-              <span className="text-zinc-500">{model}</span>
-            </div>
+            {!minimalUi && (
             <div className="hidden md:flex items-center gap-1 rounded-lg border border-[#232323] bg-[#0f0f10] p-1">
               <button
                 onClick={() => composerInputRef.current?.focus()}
@@ -1553,19 +1550,23 @@ export default function CogniraApp() {
                 Settings
               </button>
             </div>
+            )}
           </div>
           
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2 sm:gap-4">
+            {!minimalUi && (
             <div className="hidden md:inline-flex items-center gap-2 px-2.5 py-1 rounded-full border border-[#252525] bg-[#0f0f10] text-[10px] uppercase tracking-widest text-zinc-500">
               <span>{personas.find((p) => p.id === selectedPersonaId)?.name || 'Balanced'}</span>
               {activeModes.length > 0 && <span className="text-zinc-700">• {activeModes.join(' • ')}</span>}
             </div>
+            )}
             {isLoading && showTopThinkingBadge && (
               <div className="flex items-center gap-2 text-[10px] font-mono text-[#ff7a00] animate-pulse">
                 <Activity size={12} />
                 <span>THINKING...</span>
               </div>
             )}
+            {!minimalUi && (
             <button
               onClick={() => setShowCommandPalette(true)}
               className="hidden sm:inline-flex items-center gap-2 px-2.5 py-1.5 rounded-md border border-[#2a2a2a] text-[10px] uppercase tracking-widest text-zinc-400 hover:text-zinc-100 hover:bg-[#151515]"
@@ -1574,6 +1575,7 @@ export default function CogniraApp() {
               <span>Quick</span>
               <span className="text-zinc-600">Ctrl+K</span>
             </button>
+            )}
             <button
               onClick={() => setShowSettingsPanel(true)}
               aria-label="Open settings"
@@ -1587,27 +1589,27 @@ export default function CogniraApp() {
         {/* Chat Area */}
         <div ref={chatScrollRef} onScroll={handleChatScroll} className="flex-1 overflow-y-auto scrollbar-hide">
           <div className={cn(
-            "max-w-3xl mx-auto px-6",
+            "max-w-3xl mx-auto px-4 sm:px-6",
             densityMode === 'compact' ? 'py-8 space-y-8' : 'py-12 space-y-12'
           )}>
             {messages.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-[60vh] text-center space-y-8">
+              <div className="flex flex-col items-center justify-center h-[62vh] text-center space-y-6">
                 <motion.div 
                   initial={shouldReduceMotion ? false : { scale: 0.9, opacity: 0 }}
                   animate={{ scale: 1, opacity: 1 }}
                   transition={shouldReduceMotion ? { duration: 0 } : { duration: 0.3 }}
                   className={cn(
-                    "w-16 h-16 rounded-2xl flex items-center justify-center border transition-all duration-500",
-                    devMode ? "bg-[#ff7a00]/5 border-[#ff7a00]/20 text-[#ff7a00]" : "bg-white/5 border-white/10 text-white"
+                    "w-14 h-14 rounded-2xl flex items-center justify-center border transition-all duration-500",
+                    devMode ? "bg-[#ff7a00]/5 border-[#ff7a00]/20 text-[#ff7a00]" : "bg-white/5 border-white/10 text-zinc-200"
                   )}
                 >
-                  <Bot size={32} />
+                  <Bot size={28} />
                 </motion.div>
                 <div className="space-y-3">
-                  <h2 className="text-2xl font-bold tracking-tight text-white">Ask Cognira.</h2>
-                  <p className="text-zinc-500 text-sm max-w-sm mx-auto leading-relaxed font-medium">Minimalistic AI intelligence platform optimized for speed and privacy.</p>
+                  <h2 className="text-2xl font-semibold tracking-tight text-zinc-100">How can I help?</h2>
+                  <p className="text-zinc-500 text-sm max-w-sm mx-auto leading-relaxed">Start a conversation, ask a question, or paste code.</p>
                 </div>
-                <div className="grid grid-cols-2 gap-3 w-full max-w-lg">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 w-full max-w-xl">
                   {[
                     { label: 'Write a script', icon: <Terminal size={14} /> },
                     { label: 'Analyze data', icon: <Activity size={14} /> },
@@ -1617,10 +1619,10 @@ export default function CogniraApp() {
                     <button 
                       key={prompt.label}
                       onClick={() => setInput(prompt.label)}
-                      className="p-4 bg-[#111111] border border-[#2a2a2a] rounded-xl text-left text-xs hover:border-zinc-700 hover:bg-[#1a1a1a] transition-all group flex items-center justify-between"
+                      className="p-3.5 bg-[#2a2a2a]/35 border border-[#3a3a3a] rounded-xl text-left text-xs hover:border-zinc-500 hover:bg-[#2d2d2d]/40 transition-all group flex items-center justify-between"
                     >
-                      <span className="text-zinc-400 group-hover:text-white font-medium">{prompt.label}</span>
-                      <span className="text-zinc-700 group-hover:text-zinc-500">{prompt.icon}</span>
+                      <span className="text-zinc-300 group-hover:text-white font-medium">{prompt.label}</span>
+                      <span className="text-zinc-600 group-hover:text-zinc-400">{prompt.icon}</span>
                     </button>
                   ))}
                 </div>
@@ -1635,7 +1637,7 @@ export default function CogniraApp() {
                   transition={shouldReduceMotion ? { duration: 0 } : { duration: 0.22, delay: Math.min(i * 0.015, 0.18) }}
                   key={globalIndex} 
                   className={cn(
-                    "flex gap-6 group",
+                    "flex gap-4 sm:gap-6 group",
                     msg.role === 'user' ? "flex-row-reverse" : "flex-row"
                   )}
                 >
@@ -1651,12 +1653,16 @@ export default function CogniraApp() {
                     "flex-1 space-y-2 overflow-hidden",
                     msg.role === 'user' ? "text-right" : "text-left"
                   )}>
+                    {!minimalUi && (
                     <div className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest">
                       {msg.role === 'assistant' ? 'Cognira Intelligence' : 'You'}
                     </div>
+                    )}
                     <div className={cn(
-                      "text-zinc-300 leading-relaxed prose prose-invert max-w-none text-sm font-medium",
-                      msg.role === 'assistant' ? "bg-[#111111] p-4 rounded-2xl border border-[#2a2a2a] min-h-[50px]" : ""
+                      "text-zinc-200 leading-relaxed prose prose-invert max-w-none text-[15px]",
+                      msg.role === 'assistant'
+                        ? (minimalUi ? "min-h-[50px]" : "bg-[#111111] p-4 rounded-2xl border border-[#2a2a2a] min-h-[50px]")
+                        : "bg-[#2b2b2b] px-4 py-2.5 rounded-2xl inline-block"
                     )}>
                       {msg.content ? (
                         <ReactMarkdown 
@@ -1669,6 +1675,7 @@ export default function CogniraApp() {
                         <div className="space-y-2">
                           <div className="text-xs text-zinc-500 font-medium">{thinkingLabel}</div>
                           <div className="text-sm text-zinc-300">{thinkingStatus}</div>
+                          {!minimalUi && (
                           <div className="flex flex-wrap gap-1.5">
                             {[
                               { key: 'init', label: 'Init' },
@@ -1691,6 +1698,7 @@ export default function CogniraApp() {
                               </span>
                             ))}
                           </div>
+                          )}
                           <div className="flex gap-1.5 items-center h-4">
                             <div className="w-1.5 h-1.5 bg-[#ff7a00] rounded-full animate-bounce [animation-delay:-0.3s]" />
                             <div className="w-1.5 h-1.5 bg-[#ff7a00] rounded-full animate-bounce [animation-delay:-0.15s]" />
@@ -1709,7 +1717,7 @@ export default function CogniraApp() {
                         </div>
                       )}
                     </div>
-                    {msg.content && (
+                    {msg.content && !minimalUi && (
                       <div className="flex items-center gap-3 mt-4 opacity-0 group-hover:opacity-100 transition-opacity">
                         <button onClick={() => copyToClipboard(msg.content)} className="text-[10px] font-bold text-zinc-600 hover:text-zinc-400 uppercase tracking-widest flex items-center gap-1.5 transition-colors">
                           <Download size={12} /> Copy
@@ -1782,7 +1790,7 @@ export default function CogniraApp() {
         )}
 
         {/* Input Bar */}
-        <div className="p-4 sm:p-8 bg-gradient-to-t from-black via-black to-transparent">
+        <div className="p-3 sm:p-6 bg-gradient-to-t from-[#212121] via-[#212121] to-transparent">
           <div
             className="max-w-3xl mx-auto relative"
             onDragOver={(e) => {
@@ -1805,8 +1813,8 @@ export default function CogniraApp() {
               </div>
             )}
             <div className={cn(
-              "relative group bg-[#111111] border rounded-2xl transition-all duration-300",
-              devMode ? "border-[#ff7a00]/30 focus-within:border-[#ff7a00] focus-within:ring-4 focus-within:ring-[#ff7a00]/5" : "border-[#2a2a2a] focus-within:border-zinc-700 focus-within:ring-4 focus-within:ring-white/5"
+              "relative group bg-[#2b2b2b] border rounded-[28px] transition-all duration-300",
+              devMode ? "border-[#ff7a00]/30 focus-within:border-[#ff7a00] focus-within:ring-4 focus-within:ring-[#ff7a00]/5" : "border-[#3a3a3a] focus-within:border-zinc-500 focus-within:ring-2 focus-within:ring-white/10"
             )}>
               <input
                 ref={fileInputRef}
@@ -1823,14 +1831,14 @@ export default function CogniraApp() {
                   onClick={() => setShowModeMenu(prev => !prev)}
                   aria-label="Open mode menu"
                   className={cn(
-                    "p-2.5 rounded-xl transition-all border",
+                    "p-2 rounded-xl transition-all border",
                     devMode
                       ? "text-[#ff7a00] border-[#ff7a00]/30 bg-[#ff7a00]/5"
-                      : "text-zinc-600 border-[#2a2a2a] hover:text-white hover:bg-white/5"
+                      : "text-zinc-400 border-[#454545] hover:text-white hover:bg-white/5"
                   )}
                   title="Modes"
                 >
-                  <Plus size={18} />
+                  <Plus size={16} />
                 </button>
 
                 <AnimatePresence>
@@ -1955,54 +1963,57 @@ export default function CogniraApp() {
                     setShowCommandPalette(true);
                   }
                 }}
-                placeholder="Ask Cognira... (type / for commands)"
+                placeholder="Ask anything"
                 aria-label="Message composer"
-                className="w-full bg-transparent p-5 pl-16 pr-32 min-h-[60px] max-h-48 overflow-y-auto text-zinc-200 placeholder-zinc-700 focus:outline-none resize-none text-sm font-medium"
+                className="w-full bg-transparent p-4 pl-14 pr-28 min-h-[56px] max-h-48 overflow-y-auto text-zinc-100 placeholder-zinc-500 focus:outline-none resize-none text-[15px]"
                 rows={1}
               />
-              <div className="absolute right-3 bottom-3 flex items-center gap-2">
+              <div className="absolute right-3 bottom-3 flex items-center gap-1.5">
                 <button
                   onClick={() => fileInputRef.current?.click()}
                   aria-label="Attach files"
-                  className="p-2.5 rounded-xl transition-all text-zinc-600 hover:text-white hover:bg-white/5"
+                  className="p-2 rounded-xl transition-all text-zinc-400 hover:text-white hover:bg-white/5"
                   title="Attach files"
                 >
-                  <Upload size={20} />
+                  <Upload size={18} />
                 </button>
+                {!minimalUi && (
                 <button
                   onClick={pinCurrentPrompt}
                   aria-label="Pin current prompt"
-                  className="p-2.5 rounded-xl transition-all text-zinc-600 hover:text-white hover:bg-white/5"
+                  className="p-2 rounded-xl transition-all text-zinc-400 hover:text-white hover:bg-white/5"
                   title="Pin this prompt"
                 >
-                  <Pin size={20} />
+                  <Pin size={18} />
                 </button>
+                )}
                 <button 
                   onClick={toggleVoiceInput}
                   aria-label="Toggle voice input"
                   className={cn(
-                    "p-2.5 rounded-xl transition-all",
-                    isRecording ? "bg-red-500/10 text-red-500 animate-pulse" : "text-zinc-600 hover:text-white hover:bg-white/5"
+                    "p-2 rounded-xl transition-all",
+                    isRecording ? "bg-red-500/10 text-red-500 animate-pulse" : "text-zinc-400 hover:text-white hover:bg-white/5"
                   )}
                   title="Voice Input"
                 >
-                  <Mic size={20} />
+                  <Mic size={18} />
                 </button>
                 <button 
                   onClick={() => { void handleSendMessage(); }}
                   aria-label="Send message"
                   disabled={!input.trim() || isLoading}
                   className={cn(
-                    "p-2.5 rounded-xl transition-all",
+                    "p-2 rounded-xl transition-all",
                     input.trim() && !isLoading 
                       ? (devMode ? "bg-[#ff7a00] text-black shadow-lg shadow-[#ff7a00]/20" : "bg-white text-black hover:bg-zinc-200") 
-                      : "bg-zinc-900 text-zinc-700 cursor-not-allowed border border-[#2a2a2a]"
+                      : "bg-[#3a3a3a] text-zinc-600 cursor-not-allowed border border-[#494949]"
                   )}
                 >
-                  <Send size={20} />
+                  <Send size={18} />
                 </button>
               </div>
             </div>
+            {!minimalUi && (
             <div className="mt-2 min-h-5 flex items-center justify-between gap-3 px-2">
               <div className="flex items-center gap-2">
               <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">{personas.find(p => p.id === selectedPersonaId)?.name || 'Balanced'}</span>
@@ -2024,6 +2035,7 @@ export default function CogniraApp() {
                 <span>{inputCharCount} chars</span>
               </div>
             </div>
+            )}
 
             {isSlashMode && (
               <div className="mt-2 rounded-xl border border-[#2a2a2a] bg-[#0f0f0f] p-2">
@@ -2047,7 +2059,7 @@ export default function CogniraApp() {
               </div>
             )}
 
-            {(pinnedPrompts.length > 0 || attachedFiles.length > 0 || citations.length > 0) && (
+            {!minimalUi && (pinnedPrompts.length > 0 || attachedFiles.length > 0 || citations.length > 0) && (
               <div className="mt-2 flex flex-wrap items-center gap-2 px-1">
                 {pinnedPrompts.slice(0, 3).map((prompt) => (
                   <button
@@ -2071,6 +2083,7 @@ export default function CogniraApp() {
               </div>
             )}
 
+            {!minimalUi && (
             <div className="mt-4 flex items-center justify-center gap-6 text-[10px] font-bold text-zinc-700 uppercase tracking-widest">
               <div className="flex items-center gap-1.5">
                 <span className="w-1 h-1 rounded-full bg-zinc-800" />
@@ -2099,6 +2112,7 @@ export default function CogniraApp() {
                 SHORTCUTS
               </button>
             </div>
+            )}
           </div>
         </div>
 

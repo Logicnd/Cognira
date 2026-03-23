@@ -369,6 +369,12 @@ DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "free")
 USE_LOCAL = os.getenv("USE_LOCAL", "false").lower() == "true"
 HF_INFERENCE_MODEL = os.getenv("HF_INFERENCE_MODEL", "TinyLlama/TinyLlama-1.1B-Chat-v1.0")
 HF_API_TOKEN = os.getenv("HF_API_TOKEN", "")
+FREE_MODEL_CANDIDATES = [
+    model.strip() for model in os.getenv(
+        "FREE_MODEL_CANDIDATES",
+        f"{HF_INFERENCE_MODEL},Qwen/Qwen2.5-1.5B-Instruct,google/flan-t5-base"
+    ).split(",") if model.strip()
+]
 
 
 def _build_free_prompt(messages: List[Message]) -> str:
@@ -386,9 +392,29 @@ def _build_free_prompt(messages: List[Message]) -> str:
     return "\n".join(prompt_parts)
 
 
+def _clean_free_model_output(prompt: str, text: str) -> str:
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return ""
+
+    # Remove prompt echoes if provider ignored return_full_text.
+    if cleaned.startswith(prompt):
+        cleaned = cleaned[len(prompt):].strip()
+
+    for prefix in ("Assistant:", "assistant:", "Answer:", "answer:"):
+        if cleaned.startswith(prefix):
+            cleaned = cleaned[len(prefix):].strip()
+
+    # Collapse overly long outputs in free mode for better UX consistency.
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    if len(cleaned) > 1400:
+        cleaned = cleaned[:1400].rstrip() + "..."
+
+    return cleaned
+
+
 async def generate_free_llm_answer(messages: List[Message]) -> Optional[str]:
     prompt = _build_free_prompt(messages)
-    endpoint = f"https://api-inference.huggingface.co/models/{HF_INFERENCE_MODEL}"
     headers = {"Content-Type": "application/json"}
     if HF_API_TOKEN:
         headers["Authorization"] = f"Bearer {HF_API_TOKEN}"
@@ -404,23 +430,33 @@ async def generate_free_llm_answer(messages: List[Message]) -> Optional[str]:
 
     try:
         async with httpx.AsyncClient(timeout=40.0) as client:
-            response = await client.post(endpoint, headers=headers, json=payload)
-            if response.status_code >= 400:
-                logger.warning(f"HF inference failed with status {response.status_code}: {response.text[:180]}")
-                return None
+            for candidate_model in FREE_MODEL_CANDIDATES:
+                endpoint = f"https://api-inference.huggingface.co/models/{candidate_model}"
+                try:
+                    response = await client.post(endpoint, headers=headers, json=payload)
+                    if response.status_code >= 400:
+                        logger.warning(
+                            f"HF model {candidate_model} failed with status {response.status_code}: {response.text[:180]}"
+                        )
+                        continue
 
-            data = response.json()
-            if isinstance(data, dict) and data.get("error"):
-                logger.warning(f"HF inference provider error: {data.get('error')}")
-                return None
+                    data = response.json()
+                    if isinstance(data, dict) and data.get("error"):
+                        logger.warning(f"HF model {candidate_model} error: {data.get('error')}")
+                        continue
 
-            if isinstance(data, list) and data:
-                first = data[0]
-                text = ""
-                if isinstance(first, dict):
-                    text = (first.get("generated_text") or first.get("summary_text") or "").strip()
-                if text:
-                    return text
+                    if isinstance(data, list) and data:
+                        first = data[0]
+                        text = ""
+                        if isinstance(first, dict):
+                            text = (first.get("generated_text") or first.get("summary_text") or "").strip()
+                        cleaned_text = _clean_free_model_output(prompt, text)
+                        if cleaned_text:
+                            logger.info(f"HF free model success: {candidate_model}")
+                            return cleaned_text
+                except Exception as model_error:
+                    logger.warning(f"HF model {candidate_model} request failed: {model_error}")
+                    continue
             return None
     except Exception as e:
         logger.warning(f"HF free LLM fallback failed: {e}")

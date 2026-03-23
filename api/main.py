@@ -9,7 +9,9 @@ import socket
 import re
 import ast
 import operator
-from typing import List, Optional
+from abc import ABC, abstractmethod
+from typing import List, Optional, Dict, Any
+from datetime import datetime, timedelta, UTC
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -300,6 +302,53 @@ def init_db():
         )
     """)
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_file_chunks_filename ON file_chunks(filename)")
+
+    # Local subscription state (single-user local app profile).
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS subscriptions (
+            user_id TEXT PRIMARY KEY,
+            plan TEXT NOT NULL,
+            status TEXT NOT NULL,
+            billing_cycle TEXT NOT NULL,
+            amount_gbp INTEGER NOT NULL,
+            renewal_date TEXT,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS usage_counters (
+            user_id TEXT NOT NULL,
+            period_month TEXT NOT NULL,
+            messages_used INTEGER NOT NULL DEFAULT 0,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (user_id, period_month)
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS billing_audit (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            old_plan TEXT,
+            new_plan TEXT,
+            billing_cycle TEXT,
+            provider TEXT,
+            details TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    cursor.execute("SELECT user_id FROM subscriptions WHERE user_id = ?", ("local-user",))
+    if not cursor.fetchone():
+        cursor.execute(
+            """
+            INSERT INTO subscriptions (user_id, plan, status, billing_cycle, amount_gbp, renewal_date)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            ("local-user", "plus", "active", "monthly", 20, (datetime.now(UTC) + timedelta(days=30)).date().isoformat())
+        )
     
     # Check if we need to migrate existing data from messages to sessions
     cursor.execute("SELECT DISTINCT session_id FROM messages")
@@ -354,6 +403,332 @@ def get_sessions():
     conn.close()
     return [{"id": row[0], "title": row[1], "updated": row[2]} for row in rows]
 
+
+PLAN_PRICING_GBP = {
+    "plus": 20,
+    "business": 30,
+    "pro": 200,
+}
+
+PLAN_ENTITLEMENTS = {
+    "plus": {
+        "monthly_messages": 1200,
+        "allow_cloud": False,
+        "allowed_model_tokens": ["llama", "mistral", "qwen", "phi", "free"],
+    },
+    "business": {
+        "monthly_messages": 7000,
+        "allow_cloud": True,
+        "allowed_model_tokens": ["llama", "mistral", "qwen", "phi", "openai", "free"],
+    },
+    "pro": {
+        "monthly_messages": -1,
+        "allow_cloud": True,
+        "allowed_model_tokens": ["*"],
+    },
+}
+
+
+def _current_period_month() -> str:
+    return datetime.now(UTC).strftime("%Y-%m")
+
+
+def log_billing_event(
+    event_type: str,
+    old_plan: Optional[str] = None,
+    new_plan: Optional[str] = None,
+    billing_cycle: Optional[str] = None,
+    provider: Optional[str] = None,
+    details: Optional[Dict[str, Any]] = None,
+    user_id: str = "local-user",
+):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        INSERT INTO billing_audit (user_id, event_type, old_plan, new_plan, billing_cycle, provider, details)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            user_id,
+            event_type,
+            old_plan,
+            new_plan,
+            billing_cycle,
+            provider,
+            json.dumps(details or {}),
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_usage_snapshot(user_id: str = "local-user") -> Dict[str, Any]:
+    period_month = _current_period_month()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT messages_used FROM usage_counters
+        WHERE user_id = ? AND period_month = ?
+        """,
+        (user_id, period_month),
+    )
+    row = cursor.fetchone()
+    conn.close()
+    return {
+        "period_month": period_month,
+        "messages_used": int(row[0]) if row else 0,
+    }
+
+
+def increment_usage_messages(user_id: str = "local-user", increment: int = 1):
+    period_month = _current_period_month()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        INSERT INTO usage_counters (user_id, period_month, messages_used, updated_at)
+        VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(user_id, period_month) DO UPDATE SET
+            messages_used = messages_used + excluded.messages_used,
+            updated_at = CURRENT_TIMESTAMP
+        """,
+        (user_id, period_month, max(0, increment)),
+    )
+    conn.commit()
+    conn.close()
+
+
+def _is_model_allowed_for_plan(plan: str, model_name: str, use_local_model: bool) -> bool:
+    entitlements = PLAN_ENTITLEMENTS.get(plan, PLAN_ENTITLEMENTS["plus"])
+    normalized_model = strip_model_suffix(model_name).lower()
+
+    if not use_local_model and not entitlements.get("allow_cloud", False):
+        return False
+
+    allowed_tokens = entitlements.get("allowed_model_tokens", [])
+    if "*" in allowed_tokens:
+        return True
+
+    return any(token in normalized_model for token in allowed_tokens)
+
+
+def get_entitlement_status(
+    user_id: str = "local-user",
+    requested_model: Optional[str] = None,
+    use_local_model: Optional[bool] = None,
+) -> Dict[str, Any]:
+    subscription = get_subscription(user_id) or {
+        "plan": "plus",
+        "status": "active",
+        "billing_cycle": "monthly",
+        "amount_gbp": PLAN_PRICING_GBP["plus"],
+    }
+    plan = subscription.get("plan", "plus")
+    entitlements = PLAN_ENTITLEMENTS.get(plan, PLAN_ENTITLEMENTS["plus"])
+    usage = get_usage_snapshot(user_id)
+
+    monthly_limit = int(entitlements.get("monthly_messages", 0))
+    remaining = -1 if monthly_limit < 0 else max(0, monthly_limit - usage["messages_used"])
+    model_allowed = True
+
+    if requested_model and use_local_model is not None:
+        model_allowed = _is_model_allowed_for_plan(plan, requested_model, use_local_model)
+
+    return {
+        "plan": plan,
+        "status": subscription.get("status", "active"),
+        "billing_cycle": subscription.get("billing_cycle", "monthly"),
+        "usage": {
+            "period_month": usage["period_month"],
+            "messages_used": usage["messages_used"],
+            "monthly_messages_limit": monthly_limit,
+            "messages_remaining": remaining,
+        },
+        "rules": {
+            "allow_cloud": bool(entitlements.get("allow_cloud", False)),
+            "allowed_model_tokens": entitlements.get("allowed_model_tokens", []),
+        },
+        "model_allowed": model_allowed,
+    }
+
+
+def enforce_entitlements(user_id: str, requested_model: str, use_local_model: bool):
+    status = get_entitlement_status(user_id, requested_model, use_local_model)
+
+    if status["status"] != "active":
+        log_billing_event(
+            event_type="entitlement_blocked",
+            old_plan=status["plan"],
+            details={"reason": "subscription_inactive", "requested_model": requested_model},
+            provider="entitlements",
+            user_id=user_id,
+        )
+        raise HTTPException(status_code=402, detail="Subscription is not active. Update billing to continue.")
+
+    if not status["model_allowed"]:
+        log_billing_event(
+            event_type="entitlement_blocked",
+            old_plan=status["plan"],
+            details={"reason": "model_not_allowed", "requested_model": requested_model},
+            provider="entitlements",
+            user_id=user_id,
+        )
+        raise HTTPException(
+            status_code=403,
+            detail=f"Model '{requested_model}' is not available on your {status['plan']} plan.",
+        )
+
+    limit = status["usage"]["monthly_messages_limit"]
+    used = status["usage"]["messages_used"]
+    if limit >= 0 and used >= limit:
+        log_billing_event(
+            event_type="entitlement_blocked",
+            old_plan=status["plan"],
+            details={"reason": "message_limit_reached", "limit": limit, "used": used},
+            provider="entitlements",
+            user_id=user_id,
+        )
+        raise HTTPException(
+            status_code=429,
+            detail=f"Monthly message limit reached ({used}/{limit}). Upgrade your plan to continue.",
+        )
+
+
+class CheckoutProvider(ABC):
+    name: str = "abstract"
+
+    @abstractmethod
+    def create_checkout_session(self, user_id: str, plan: str, billing_cycle: str) -> Dict[str, Any]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def cancel_subscription(self, user_id: str) -> Dict[str, Any]:
+        raise NotImplementedError
+
+
+class LocalMockCheckoutProvider(CheckoutProvider):
+    name = "mock"
+
+    def create_checkout_session(self, user_id: str, plan: str, billing_cycle: str) -> Dict[str, Any]:
+        return {
+            "provider": self.name,
+            "checkout_session_id": f"mock_{user_id}_{plan}_{int(datetime.now(UTC).timestamp())}",
+            "mode": "simulation",
+            "status": "completed",
+            "billing_cycle": billing_cycle,
+        }
+
+    def cancel_subscription(self, user_id: str) -> Dict[str, Any]:
+        return {
+            "provider": self.name,
+            "cancellation_id": f"mock_cancel_{user_id}_{int(datetime.now(UTC).timestamp())}",
+            "mode": "simulation",
+            "status": "completed",
+        }
+
+
+class StripeCheckoutProvider(CheckoutProvider):
+    name = "stripe"
+
+    def __init__(self, secret_key: str):
+        self.secret_key = secret_key
+
+    def create_checkout_session(self, user_id: str, plan: str, billing_cycle: str) -> Dict[str, Any]:
+        if not self.secret_key:
+            raise RuntimeError("Stripe provider is not configured. Set STRIPE_SECRET_KEY.")
+        raise RuntimeError("Stripe checkout integration is scaffolded but not enabled in this local build.")
+
+    def cancel_subscription(self, user_id: str) -> Dict[str, Any]:
+        if not self.secret_key:
+            raise RuntimeError("Stripe provider is not configured. Set STRIPE_SECRET_KEY.")
+        raise RuntimeError("Stripe cancellation integration is scaffolded but not enabled in this local build.")
+
+
+CHECKOUT_PROVIDER = os.getenv("CHECKOUT_PROVIDER", "mock").strip().lower()
+STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
+
+
+def get_checkout_provider() -> CheckoutProvider:
+    if CHECKOUT_PROVIDER == "stripe":
+        return StripeCheckoutProvider(STRIPE_SECRET_KEY)
+    return LocalMockCheckoutProvider()
+
+
+def get_subscription(user_id: str = "local-user"):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT plan, status, billing_cycle, amount_gbp, renewal_date, updated_at
+        FROM subscriptions
+        WHERE user_id = ?
+        """,
+        (user_id,),
+    )
+    row = cursor.fetchone()
+    conn.close()
+    if not row:
+        return None
+    return {
+        "user_id": user_id,
+        "plan": row[0],
+        "status": row[1],
+        "billing_cycle": row[2],
+        "amount_gbp": row[3],
+        "renewal_date": row[4],
+        "updated_at": row[5],
+    }
+
+
+def set_subscription(plan: str, billing_cycle: str = "monthly", user_id: str = "local-user"):
+    normalized_plan = (plan or "").strip().lower()
+    if normalized_plan not in PLAN_PRICING_GBP:
+        raise ValueError("invalid plan")
+
+    normalized_cycle = "yearly" if (billing_cycle or "").strip().lower() == "yearly" else "monthly"
+    amount = PLAN_PRICING_GBP[normalized_plan]
+    if normalized_cycle == "yearly":
+        amount *= 12
+
+    renewal_delta = timedelta(days=365 if normalized_cycle == "yearly" else 30)
+    renewal_date = (datetime.now(UTC) + renewal_delta).date().isoformat()
+
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        INSERT INTO subscriptions (user_id, plan, status, billing_cycle, amount_gbp, renewal_date, updated_at)
+        VALUES (?, ?, 'active', ?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(user_id) DO UPDATE SET
+            plan=excluded.plan,
+            status='active',
+            billing_cycle=excluded.billing_cycle,
+            amount_gbp=excluded.amount_gbp,
+            renewal_date=excluded.renewal_date,
+            updated_at=CURRENT_TIMESTAMP
+        """,
+        (user_id, normalized_plan, normalized_cycle, amount, renewal_date),
+    )
+    conn.commit()
+    conn.close()
+
+
+def cancel_subscription(user_id: str = "local-user"):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        UPDATE subscriptions
+        SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP
+        WHERE user_id = ?
+        """,
+        (user_id,),
+    )
+    conn.commit()
+    conn.close()
+
 # CORS for frontend integration
 app.add_middleware(
     CORSMiddleware,
@@ -366,6 +741,8 @@ app.add_middleware(
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434/api")
 DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "free")
 USE_LOCAL = os.getenv("USE_LOCAL", "false").lower() == "true"
+DEFAULT_LOCAL_MODEL = os.getenv("DEFAULT_LOCAL_MODEL", "llama3")
+ENABLE_CLOUD_MODELS = os.getenv("ENABLE_CLOUD_MODELS", "true").lower() == "true"
 HF_INFERENCE_MODEL = os.getenv("HF_INFERENCE_MODEL", "TinyLlama/TinyLlama-1.1B-Chat-v1.0")
 HF_API_TOKEN = os.getenv("HF_API_TOKEN", "")
 FREE_MODEL_CANDIDATES = [
@@ -476,6 +853,11 @@ class ChatRequest(BaseModel):
 class CommandSuggestionRequest(BaseModel):
     query: str
 
+
+class SubscriptionUpdateRequest(BaseModel):
+    plan: str
+    billing_cycle: Optional[str] = "monthly"
+
 @app.get("/history/{session_id}")
 async def get_chat_history(session_id: str):
     return {"messages": get_history(session_id)}
@@ -514,10 +896,127 @@ async def check_ollama_connection():
     except Exception:
         return False
 
+
+@app.get("/billing/subscription")
+async def billing_subscription():
+    subscription = get_subscription()
+    if not subscription:
+        raise HTTPException(status_code=404, detail="Subscription not found")
+    return {"subscription": subscription}
+
+
+@app.get("/billing/entitlements")
+async def billing_entitlements():
+    return {"entitlements": get_entitlement_status()}
+
+
+@app.get("/billing/audit")
+async def billing_audit(limit: int = 100):
+    safe_limit = max(1, min(limit, 500))
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT id, user_id, event_type, old_plan, new_plan, billing_cycle, provider, details, created_at
+        FROM billing_audit
+        ORDER BY id DESC
+        LIMIT ?
+        """,
+        (safe_limit,),
+    )
+    rows = cursor.fetchall()
+    conn.close()
+
+    events = []
+    for row in rows:
+        details = {}
+        if row[7]:
+            try:
+                details = json.loads(row[7])
+            except Exception:
+                details = {"raw": row[7]}
+
+        events.append({
+            "id": row[0],
+            "user_id": row[1],
+            "event_type": row[2],
+            "old_plan": row[3],
+            "new_plan": row[4],
+            "billing_cycle": row[5],
+            "provider": row[6],
+            "details": details,
+            "created_at": row[8],
+        })
+
+    return {"events": events}
+
+
+@app.post("/billing/subscribe")
+async def billing_subscribe(request: SubscriptionUpdateRequest):
+    previous_subscription = get_subscription()
+    previous_plan = previous_subscription["plan"] if previous_subscription else None
+    provider = get_checkout_provider()
+
+    try:
+        checkout_result = provider.create_checkout_session(
+            user_id="local-user",
+            plan=request.plan,
+            billing_cycle=request.billing_cycle or "monthly",
+        )
+        set_subscription(request.plan, request.billing_cycle or "monthly")
+        updated_subscription = get_subscription()
+        log_billing_event(
+            event_type="plan_changed",
+            old_plan=previous_plan,
+            new_plan=updated_subscription["plan"] if updated_subscription else request.plan,
+            billing_cycle=updated_subscription["billing_cycle"] if updated_subscription else (request.billing_cycle or "monthly"),
+            provider=provider.name,
+            details={"checkout": checkout_result},
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    subscription = get_subscription()
+    return {"status": "updated", "subscription": subscription, "provider": provider.name}
+
+
+@app.post("/billing/cancel")
+async def billing_cancel():
+    provider = get_checkout_provider()
+    previous_subscription = get_subscription()
+
+    try:
+        cancellation = provider.cancel_subscription("local-user")
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    cancel_subscription()
+    subscription = get_subscription()
+    log_billing_event(
+        event_type="subscription_cancelled",
+        old_plan=previous_subscription["plan"] if previous_subscription else None,
+        new_plan=subscription["plan"] if subscription else None,
+        billing_cycle=subscription["billing_cycle"] if subscription else None,
+        provider=provider.name,
+        details={"cancellation": cancellation},
+    )
+    return {"status": "cancelled", "subscription": subscription, "provider": provider.name}
+
 @app.post("/chat")
 async def chat(request: ChatRequest):
     requested_model = request.model or DEFAULT_MODEL
     use_local_model = should_use_local_model(requested_model)
+
+    # Hard guardrail for no-paid/no-cloud mode.
+    if not use_local_model and not ENABLE_CLOUD_MODELS:
+        requested_model = f"{DEFAULT_LOCAL_MODEL} (Local)"
+        use_local_model = True
+
+    enforce_entitlements("local-user", requested_model, use_local_model)
+    increment_usage_messages("local-user", 1)
+
     logger.info(f"Received chat request for model: {requested_model} (Local: {use_local_model})")
     
     # Save user message
@@ -693,7 +1192,13 @@ async def chat(request: ChatRequest):
 
             # --- TOTAL FAILURE ---
             if use_local_model:
-                error_message = "The selected local model is unavailable. Start Ollama or pick a cloud model."
+                if ENABLE_CLOUD_MODELS:
+                    error_message = "The selected local model is unavailable. Start Ollama or pick a cloud model."
+                else:
+                    error_message = (
+                        "The selected local model is unavailable and cloud providers are disabled by configuration. "
+                        f"Start Ollama and pull a model such as '{DEFAULT_LOCAL_MODEL}'."
+                    )
             else:
                 cloud_reason = "; ".join(cloud_failure_reasons[-2:]) if cloud_failure_reasons else "no provider details available"
                 error_message = (
@@ -740,10 +1245,26 @@ async def list_models():
     except Exception:
         pass # Ollama not running
 
-    # 2. Cloud Models (Pollinations)
-    models.extend(SUPPORTED_CLOUD_MODELS)
+    # 2. Cloud models are optional and can be disabled in no-paid mode.
+    if ENABLE_CLOUD_MODELS:
+        models.extend(SUPPORTED_CLOUD_MODELS)
+
+    if not models:
+        models.append({"name": f"{DEFAULT_LOCAL_MODEL} (Local)", "provider": "local-default"})
+
+    entitlement = get_entitlement_status()
+    plan = entitlement["plan"]
+    filtered_models = []
+    for model in models:
+        model_name = model.get("name", "")
+        model_is_local = model_name.lower().endswith("(local)") or model.get("provider", "").startswith("local")
+        if _is_model_allowed_for_plan(plan, model_name, model_is_local):
+            filtered_models.append(model)
+
+    if not filtered_models:
+        filtered_models.append({"name": f"{DEFAULT_LOCAL_MODEL} (Local)", "provider": "local-default"})
     
-    return {"models": models}
+    return {"models": filtered_models, "entitlements": entitlement}
 
 @app.post("/files/upload")
 async def upload_file(file: UploadFile = File(...)):

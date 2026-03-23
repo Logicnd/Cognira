@@ -1,10 +1,21 @@
 import React, { useState, useEffect, useRef, type CSSProperties } from 'react';
 import Head from 'next/head';
+import Link from 'next/link';
 import { 
   Send, 
   Bot, 
   User, 
   Settings, 
+  Bell,
+  SlidersHorizontal,
+  LayoutGrid,
+  CalendarClock,
+  Database,
+  Lock,
+  ShieldAlert,
+  CircleUserRound,
+  CreditCard,
+  Crown,
   Cpu, 
   Activity, 
   Shield, 
@@ -105,6 +116,33 @@ interface ModelOption {
   provider: string;
 }
 
+type SettingsTab =
+  | 'general'
+  | 'notifications'
+  | 'personalization'
+  | 'apps'
+  | 'schedules'
+  | 'data-controls'
+  | 'security'
+  | 'parental-controls'
+  | 'account';
+
+interface BillingSubscription {
+  user_id: string;
+  plan: 'plus' | 'business' | 'pro';
+  status: 'active' | 'cancelled';
+  billing_cycle: 'monthly' | 'yearly';
+  amount_gbp: number;
+  renewal_date: string;
+  updated_at: string;
+}
+
+interface SettingsTabItem {
+  id: SettingsTab;
+  label: string;
+  icon: React.ReactNode;
+}
+
 interface StreamChunk {
   content?: string;
   done?: boolean;
@@ -145,6 +183,7 @@ declare global {
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 const LOW_RESOURCE_MODE = process.env.NEXT_PUBLIC_LOW_RESOURCE_MODE === 'true';
+const DEFAULT_MODEL_LABEL = process.env.NEXT_PUBLIC_DEFAULT_MODEL_LABEL ?? 'llama3 (Local)';
 const DEFAULT_PERSONAS: Persona[] = [
   {
     id: 'balanced',
@@ -168,6 +207,17 @@ const DEFAULT_PINNED_PROMPTS = [
   'Suggest next development steps',
   'Generate tests for the last code block',
   'Find likely performance bottlenecks'
+];
+const SETTINGS_TABS: SettingsTabItem[] = [
+  { id: 'general', label: 'General', icon: <Settings size={14} /> },
+  { id: 'notifications', label: 'Notifications', icon: <Bell size={14} /> },
+  { id: 'personalization', label: 'Personalization', icon: <SlidersHorizontal size={14} /> },
+  { id: 'apps', label: 'Apps', icon: <LayoutGrid size={14} /> },
+  { id: 'schedules', label: 'Schedules', icon: <CalendarClock size={14} /> },
+  { id: 'data-controls', label: 'Data controls', icon: <Database size={14} /> },
+  { id: 'security', label: 'Security', icon: <Lock size={14} /> },
+  { id: 'parental-controls', label: 'Parental controls', icon: <ShieldAlert size={14} /> },
+  { id: 'account', label: 'Account', icon: <CircleUserRound size={14} /> }
 ];
 const syntaxTheme: Record<string, CSSProperties> = vscDarkPlus;
 const markdownComponents: Components = {
@@ -214,7 +264,7 @@ export default function CogniraApp() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [model, setModel] = useState('free (Cloud)');
+  const [model, setModel] = useState(DEFAULT_MODEL_LABEL);
   const [models, setModels] = useState<ModelOption[]>([]);
   const [stats, setStats] = useState<SystemStats | null>(null);
   const [showSidebar, setShowSidebar] = useState(true);
@@ -237,6 +287,11 @@ export default function CogniraApp() {
   const [attachedFiles, setAttachedFiles] = useState<UploadedFileItem[]>([]);
   const [citations, setCitations] = useState<CitationItem[]>([]);
   const [showSettingsPanel, setShowSettingsPanel] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>('general');
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const [billingCycle, setBillingCycle] = useState<'monthly' | 'yearly'>('monthly');
+  const [subscription, setSubscription] = useState<BillingSubscription | null>(null);
+  const [billingBusy, setBillingBusy] = useState(false);
   const [densityMode, setDensityMode] = useState<DensityMode>('comfortable');
   const [showTopThinkingBadge, setShowTopThinkingBadge] = useState(false);
   const [showSystemHealthCard, setShowSystemHealthCard] = useState(false);
@@ -423,12 +478,14 @@ export default function CogniraApp() {
 
       if ((event.ctrlKey || event.metaKey) && event.key === ',') {
         event.preventDefault();
+        setSettingsTab('general');
         setShowSettingsPanel(true);
         return;
       }
 
       if (event.key === 'Escape') {
         setShowSettingsPanel(false);
+        setShowUpgradeModal(false);
         setShowCommandPalette(false);
         setShowShortcutsPanel(false);
       }
@@ -557,7 +614,7 @@ export default function CogniraApp() {
           setModel((currentModel) => (
             availableModels.some((availableModel) => availableModel.name === currentModel)
               ? currentModel
-              : (availableModels[0]?.name ?? currentModel)
+              : (availableModels[0]?.name ?? DEFAULT_MODEL_LABEL)
           ));
         }
       } catch (error) {
@@ -565,6 +622,19 @@ export default function CogniraApp() {
       }
     };
     fetchModels();
+  }, []);
+
+  useEffect(() => {
+    const fetchSubscription = async () => {
+      try {
+        const response = await axios.get(`${API_URL}/billing/subscription`);
+        setSubscription((response.data?.subscription || null) as BillingSubscription | null);
+      } catch (error) {
+        console.error('Failed to fetch subscription', error);
+      }
+    };
+
+    fetchSubscription();
   }, []);
 
   // Load chat history
@@ -595,6 +665,41 @@ export default function CogniraApp() {
 
   const appendAssistantNotice = (content: string) => {
     setMessages((prev) => [...prev, { role: 'assistant', content }]);
+  };
+
+  const subscribeToPlan = async (plan: BillingSubscription['plan']) => {
+    try {
+      setBillingBusy(true);
+      const response = await axios.post(`${API_URL}/billing/subscribe`, {
+        plan,
+        billing_cycle: billingCycle
+      });
+      const nextSubscription = (response.data?.subscription || null) as BillingSubscription | null;
+      setSubscription(nextSubscription);
+      setShowUpgradeModal(false);
+      setSettingsTab('account');
+      setShowSettingsPanel(true);
+      appendAssistantNotice(`Plan updated to ${plan.toUpperCase()} (${billingCycle}).`);
+    } catch (error) {
+      console.error('Failed to update plan', error);
+      appendAssistantNotice('Could not update subscription right now.');
+    } finally {
+      setBillingBusy(false);
+    }
+  };
+
+  const cancelPlan = async () => {
+    try {
+      setBillingBusy(true);
+      const response = await axios.post(`${API_URL}/billing/cancel`);
+      setSubscription((response.data?.subscription || null) as BillingSubscription | null);
+      appendAssistantNotice('Subscription marked as cancelled.');
+    } catch (error) {
+      console.error('Failed to cancel plan', error);
+      appendAssistantNotice('Could not cancel subscription right now.');
+    } finally {
+      setBillingBusy(false);
+    }
   };
 
   const executeSlashCommand = async (rawInput: string): Promise<boolean> => {
@@ -1156,6 +1261,7 @@ export default function CogniraApp() {
       keywords: 'settings preferences config',
       hint: 'Ctrl+,',
       action: () => {
+        setSettingsTab('general');
         setShowSettingsPanel(true);
         closePalette();
       }
@@ -1476,6 +1582,32 @@ export default function CogniraApp() {
               )}
             </div>
 
+            <div className="p-3 border-t border-[#2a2a2a] bg-[#101010] space-y-2">
+              <button
+                onClick={() => setShowUpgradeModal(true)}
+                className="w-full flex items-center justify-between rounded-lg border border-[#2f2f2f] bg-[#151515] px-3 py-2.5 hover:border-zinc-500 transition-colors"
+              >
+                <span className="flex items-center gap-2 text-[11px] text-zinc-200 font-medium">
+                  <Crown size={13} className="text-amber-300" />
+                  {subscription?.plan ? `${subscription.plan.toUpperCase()} plan` : 'Upgrade plan'}
+                </span>
+                <span className="text-[10px] text-zinc-500">Manage</span>
+              </button>
+              <button
+                onClick={() => {
+                  setSettingsTab('account');
+                  setShowSettingsPanel(true);
+                }}
+                className="w-full flex items-center justify-between rounded-lg border border-[#2a2a2a] bg-[#131313] px-3 py-2 text-[11px] text-zinc-300 hover:border-zinc-500 transition-colors"
+              >
+                <span className="flex items-center gap-2">
+                  <CircleUserRound size={13} />
+                  Local account
+                </span>
+                <span className="text-zinc-500">Settings</span>
+              </button>
+            </div>
+
             {!minimalUi && (
             <div className="p-4 border-t border-[#2a2a2a] flex flex-col gap-3 bg-[#0d0d0d]">
               <div className="flex items-center justify-between px-1">
@@ -1544,7 +1676,10 @@ export default function CogniraApp() {
                 History
               </button>
               <button
-                onClick={() => setShowSettingsPanel(true)}
+                onClick={() => {
+                  setSettingsTab('general');
+                  setShowSettingsPanel(true);
+                }}
                 className="px-2 py-1 rounded-md text-[10px] uppercase tracking-widest text-zinc-400 hover:bg-[#1b1b1b]"
               >
                 Settings
@@ -1577,7 +1712,18 @@ export default function CogniraApp() {
             </button>
             )}
             <button
-              onClick={() => setShowSettingsPanel(true)}
+              onClick={() => setShowUpgradeModal(true)}
+              className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-[#2a2a2a] bg-[#171717] text-[10px] uppercase tracking-widest text-zinc-300 hover:text-white hover:border-zinc-500"
+              aria-label="Upgrade plan"
+            >
+              <Crown size={12} />
+              Upgrade
+            </button>
+            <button
+              onClick={() => {
+                setSettingsTab('general');
+                setShowSettingsPanel(true);
+              }}
               aria-label="Open settings"
               className="p-2 hover:bg-[#1a1a1a] rounded-md transition-colors text-zinc-500 hover:text-white"
             >
@@ -2286,99 +2432,272 @@ export default function CogniraApp() {
                 className="fixed inset-0 bg-black/55 z-40"
                 onClick={() => setShowSettingsPanel(false)}
               />
-              <motion.aside
-                initial={shouldReduceMotion ? false : { x: 360, opacity: 0 }}
-                animate={{ x: 0, opacity: 1 }}
-                exit={shouldReduceMotion ? { opacity: 0 } : { x: 360, opacity: 0 }}
-                transition={shouldReduceMotion ? { duration: 0 } : { type: 'spring', stiffness: 260, damping: 26 }}
-                className="fixed top-0 right-0 h-full w-[min(92vw,360px)] z-50 bg-[#0f0f10] border-l border-[#262626] shadow-2xl"
+              <motion.section
+                initial={shouldReduceMotion ? false : { opacity: 0, y: 12, scale: 0.98 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, y: 12, scale: 0.98 }}
+                transition={shouldReduceMotion ? { duration: 0 } : { duration: 0.16 }}
+                className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 h-[min(90vh,780px)] w-[min(95vw,980px)] z-50 bg-[#101011] border border-[#262626] rounded-2xl shadow-2xl"
               >
-                <div className="h-full flex flex-col">
-                  <div className="px-4 py-3 border-b border-[#262626] flex items-center justify-between">
-                    <div>
-                      <div className="text-sm font-semibold text-zinc-100">Settings</div>
-                      <div className="text-[11px] text-zinc-500">Customize your Cognira workspace</div>
+                <div className="h-full flex">
+                  <div className="w-[220px] border-r border-[#262626] p-3 bg-[#0f0f10] rounded-l-2xl">
+                    <div className="px-2 pb-3 text-xs text-zinc-400">Settings</div>
+                    <div className="space-y-1">
+                      {SETTINGS_TABS.map((tab) => (
+                        <button
+                          key={tab.id}
+                          onClick={() => setSettingsTab(tab.id)}
+                          className={cn(
+                            'w-full text-left px-3 py-2 rounded-lg flex items-center gap-2 text-sm transition-colors',
+                            settingsTab === tab.id
+                              ? 'bg-[#2a2a2a] text-zinc-100'
+                              : 'text-zinc-400 hover:text-zinc-100 hover:bg-[#191919]'
+                          )}
+                        >
+                          {tab.icon}
+                          <span>{tab.label}</span>
+                        </button>
+                      ))}
                     </div>
-                    <button
-                      onClick={() => setShowSettingsPanel(false)}
-                      className="p-2 rounded-md text-zinc-400 hover:text-white hover:bg-[#1a1a1a]"
-                    >
-                      <X size={16} />
-                    </button>
                   </div>
 
-                  <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                    <div className="rounded-xl border border-[#252525] bg-[#121212] p-3 space-y-3">
-                      <div className="text-[11px] uppercase tracking-widest text-zinc-500 font-bold">Layout</div>
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between text-sm">
-                          <span className="text-zinc-300">Density</span>
-                          <select
-                            value={densityMode}
-                            onChange={(e) => setDensityMode(e.target.value as DensityMode)}
-                            className="bg-[#0e0e0e] border border-[#2a2a2a] rounded-md px-2 py-1 text-xs text-zinc-200"
-                          >
-                            <option value="comfortable">Comfortable</option>
-                            <option value="compact">Compact</option>
-                          </select>
-                        </div>
-                        <label className="flex items-center justify-between text-sm text-zinc-300">
-                          <span>Slash commands in composer</span>
-                          <span className="text-[11px] text-emerald-400 font-medium">Enabled</span>
-                        </label>
-                        <label className="flex items-center justify-between text-sm text-zinc-300">
-                          <span>Show sidebar navigation</span>
-                          <input type="checkbox" checked={showSidebar} onChange={(e) => setShowSidebar(e.target.checked)} />
-                        </label>
-                        <label className="flex items-center justify-between text-sm text-zinc-300">
-                          <span>Show top thinking badge</span>
-                          <input type="checkbox" checked={showTopThinkingBadge} onChange={(e) => setShowTopThinkingBadge(e.target.checked)} />
-                        </label>
-                        <label className="flex items-center justify-between text-sm text-zinc-300">
-                          <span>Show system health card</span>
-                          <input type="checkbox" checked={showSystemHealthCard} onChange={(e) => setShowSystemHealthCard(e.target.checked)} />
-                        </label>
-                      </div>
-                    </div>
-
-                    <div className="rounded-xl border border-[#252525] bg-[#121212] p-3 space-y-3">
-                      <div className="text-[11px] uppercase tracking-widest text-zinc-500 font-bold">Behavior</div>
-                      <label className="flex items-center justify-between text-sm text-zinc-300">
-                        <span>Performance mode</span>
-                        <input type="checkbox" checked={performanceMode} onChange={(e) => setPerformanceMode(e.target.checked)} />
-                      </label>
+                  <div className="flex-1 flex flex-col">
+                    <div className="px-5 py-4 border-b border-[#262626] flex items-center justify-between">
+                      <div className="text-base font-semibold text-zinc-100">{SETTINGS_TABS.find((tab) => tab.id === settingsTab)?.label || 'Settings'}</div>
                       <button
-                        onClick={() => {
-                          setShowSettingsPanel(false);
-                          setShowShortcutsPanel(true);
-                        }}
-                        className="w-full text-left px-3 py-2 rounded-lg border border-[#2a2a2a] bg-[#161616] text-zinc-300 text-xs hover:bg-[#1c1c1c]"
+                        onClick={() => setShowSettingsPanel(false)}
+                        className="p-2 rounded-md text-zinc-400 hover:text-white hover:bg-[#1a1a1a]"
                       >
-                        View keyboard shortcuts
+                        <X size={16} />
                       </button>
-                      <div className="text-[11px] text-zinc-500">Performance mode reduces rendering work and polling frequency.</div>
                     </div>
 
-                    <div className="rounded-xl border border-[#252525] bg-[#121212] p-3 space-y-3">
-                      <div className="text-[11px] uppercase tracking-widest text-zinc-500 font-bold">Data</div>
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={exportUiSettings}
-                          className="px-3 py-1.5 rounded-lg bg-[#171717] border border-[#2a2a2a] text-zinc-200 text-xs inline-flex items-center gap-1.5 hover:bg-[#1e1e1e]"
-                        >
-                          <Save size={13} /> Copy settings JSON
-                        </button>
-                        <button
-                          onClick={resetUiSettings}
-                          className="px-3 py-1.5 rounded-lg bg-[#171717] border border-[#2a2a2a] text-zinc-200 text-xs hover:bg-[#1e1e1e]"
-                        >
-                          Reset UI defaults
-                        </button>
-                      </div>
+                    <div className="flex-1 overflow-y-auto p-5 space-y-4">
+                      {settingsTab === 'general' && (
+                        <div className="space-y-3">
+                          <div className="rounded-xl border border-[#252525] bg-[#121212] p-4 space-y-3">
+                            <div className="text-sm text-zinc-200 font-medium">Appearance</div>
+                            <div className="flex items-center justify-between text-sm">
+                              <span className="text-zinc-400">Density</span>
+                              <select
+                                value={densityMode}
+                                onChange={(e) => setDensityMode(e.target.value as DensityMode)}
+                                className="bg-[#0e0e0e] border border-[#2a2a2a] rounded-md px-2 py-1 text-xs text-zinc-200"
+                              >
+                                <option value="comfortable">Comfortable</option>
+                                <option value="compact">Compact</option>
+                              </select>
+                            </div>
+                          </div>
+                          <div className="rounded-xl border border-[#252525] bg-[#121212] p-4 space-y-3">
+                            <div className="text-sm text-zinc-200 font-medium">Workspace</div>
+                            <label className="flex items-center justify-between text-sm text-zinc-300">
+                              <span>Show sidebar navigation</span>
+                              <input type="checkbox" checked={showSidebar} onChange={(e) => setShowSidebar(e.target.checked)} />
+                            </label>
+                            <label className="flex items-center justify-between text-sm text-zinc-300">
+                              <span>Show top thinking badge</span>
+                              <input type="checkbox" checked={showTopThinkingBadge} onChange={(e) => setShowTopThinkingBadge(e.target.checked)} />
+                            </label>
+                            <label className="flex items-center justify-between text-sm text-zinc-300">
+                              <span>Show system health card</span>
+                              <input type="checkbox" checked={showSystemHealthCard} onChange={(e) => setShowSystemHealthCard(e.target.checked)} />
+                            </label>
+                          </div>
+                        </div>
+                      )}
+
+                      {settingsTab === 'notifications' && (
+                        <div className="rounded-xl border border-[#252525] bg-[#121212] p-4 space-y-3">
+                          {['Responses', 'Tasks', 'Projects', 'Recommendations', 'Usage'].map((row) => (
+                            <div key={row} className="flex items-center justify-between py-2 border-b last:border-b-0 border-[#222]">
+                              <span className="text-sm text-zinc-300">{row}</span>
+                              <span className="text-xs text-zinc-500">Push, Email</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {settingsTab === 'personalization' && (
+                        <div className="space-y-3">
+                          <div className="rounded-xl border border-[#252525] bg-[#121212] p-4 space-y-3">
+                            <div className="text-sm text-zinc-200 font-medium">Response behavior</div>
+                            <label className="flex items-center justify-between text-sm text-zinc-300">
+                              <span>Performance mode</span>
+                              <input type="checkbox" checked={performanceMode} onChange={(e) => setPerformanceMode(e.target.checked)} />
+                            </label>
+                            <label className="flex items-center justify-between text-sm text-zinc-300">
+                              <span>Instant answers</span>
+                              <span className="text-xs text-zinc-500">Enabled</span>
+                            </label>
+                          </div>
+                          <div className="rounded-xl border border-[#252525] bg-[#121212] p-4 space-y-2">
+                            <div className="text-sm text-zinc-200 font-medium">Custom instructions</div>
+                            <textarea
+                              value={reusableSystemPrompt}
+                              onChange={(e) => setReusableSystemPrompt(e.target.value)}
+                              className="w-full min-h-[120px] bg-[#0f0f0f] border border-[#2a2a2a] rounded-lg p-3 text-sm text-zinc-200"
+                              placeholder="How should Cognira respond?"
+                            />
+                          </div>
+                        </div>
+                      )}
+
+                      {(settingsTab === 'apps' || settingsTab === 'schedules' || settingsTab === 'parental-controls') && (
+                        <div className="rounded-xl border border-[#252525] bg-[#121212] p-4 text-sm text-zinc-400">
+                          This section is scaffolded for parity with ChatGPT-style layout and ready for feature wiring.
+                        </div>
+                      )}
+
+                      {settingsTab === 'data-controls' && (
+                        <div className="rounded-xl border border-[#252525] bg-[#121212] p-4 space-y-3">
+                          <div className="flex items-center justify-between text-sm">
+                            <span className="text-zinc-300">Improve the model for everyone</span>
+                            <span className="text-zinc-500">On</span>
+                          </div>
+                          <button
+                            onClick={exportUiSettings}
+                            className="px-3 py-1.5 rounded-lg bg-[#171717] border border-[#2a2a2a] text-zinc-200 text-xs inline-flex items-center gap-1.5 hover:bg-[#1e1e1e]"
+                          >
+                            <Save size={13} /> Export data
+                          </button>
+                          <button
+                            onClick={resetUiSettings}
+                            className="px-3 py-1.5 rounded-lg bg-[#171717] border border-[#2a2a2a] text-zinc-200 text-xs hover:bg-[#1e1e1e]"
+                          >
+                            Reset UI defaults
+                          </button>
+                        </div>
+                      )}
+
+                      {settingsTab === 'security' && (
+                        <div className="rounded-xl border border-[#252525] bg-[#121212] p-4 space-y-3">
+                          <div className="text-sm text-zinc-200 font-medium">Secure your account</div>
+                          <div className="text-sm text-zinc-400">Add multi-factor authentication (MFA) and recovery options.</div>
+                          <button className="px-3 py-1.5 rounded-lg bg-[#171717] border border-[#2a2a2a] text-zinc-200 text-xs hover:bg-[#1e1e1e]">Set up MFA</button>
+                        </div>
+                      )}
+
+                      {settingsTab === 'account' && (
+                        <div className="space-y-3">
+                          <div className="rounded-xl border border-[#252525] bg-[#121212] p-4 space-y-2">
+                            <div className="text-sm text-zinc-200 font-medium">Account</div>
+                            <div className="text-sm text-zinc-400">Name: Local User</div>
+                            <div className="text-sm text-zinc-400">Email: local@cognira.dev</div>
+                            <div className="text-sm text-zinc-400">Plan: {subscription?.plan?.toUpperCase() || 'PLUS'} ({subscription?.status || 'active'})</div>
+                            <div className="text-sm text-zinc-400">Billing: {subscription?.billing_cycle || 'monthly'} · GBP {subscription?.amount_gbp ?? 20}</div>
+                            <div className="pt-2 flex items-center gap-2">
+                              <button
+                                onClick={() => setShowUpgradeModal(true)}
+                                className="px-3 py-1.5 rounded-lg bg-[#1d1d2f] border border-[#373766] text-indigo-200 text-xs inline-flex items-center gap-1.5 hover:bg-[#24243a]"
+                              >
+                                <CreditCard size={13} /> Manage plan
+                              </button>
+                              <Link
+                                href="/admin/billing"
+                                className="px-3 py-1.5 rounded-lg bg-[#151518] border border-[#2a2a2a] text-zinc-200 text-xs hover:bg-[#1d1d22]"
+                              >
+                                Billing audit
+                              </Link>
+                              <button
+                                onClick={cancelPlan}
+                                disabled={billingBusy}
+                                className="px-3 py-1.5 rounded-lg bg-[#171717] border border-[#2a2a2a] text-zinc-200 text-xs hover:bg-[#1e1e1e] disabled:opacity-50"
+                              >
+                                Cancel plan
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
-              </motion.aside>
+              </motion.section>
+            </>
+          )}
+        </AnimatePresence>
+
+        <AnimatePresence>
+          {showUpgradeModal && (
+            <>
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="fixed inset-0 bg-black/70 z-50"
+                onClick={() => setShowUpgradeModal(false)}
+              />
+              <motion.section
+                initial={shouldReduceMotion ? false : { opacity: 0, y: 12, scale: 0.98 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, y: 12, scale: 0.98 }}
+                transition={shouldReduceMotion ? { duration: 0 } : { duration: 0.16 }}
+                className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[60] w-[min(95vw,1080px)] rounded-2xl border border-[#2a2a2a] bg-[#111112] p-6"
+              >
+                <div className="flex items-center justify-between mb-5">
+                  <div>
+                    <h3 className="text-2xl font-semibold text-zinc-100">Upgrade your plan</h3>
+                    <p className="text-sm text-zinc-500">Local billing simulation for development parity.</p>
+                  </div>
+                  <button onClick={() => setShowUpgradeModal(false)} className="p-2 rounded-md text-zinc-400 hover:bg-[#1c1c1c] hover:text-white">
+                    <X size={16} />
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-2 mb-5">
+                  <button
+                    onClick={() => setBillingCycle('monthly')}
+                    className={cn('px-3 py-1.5 rounded-full text-xs border', billingCycle === 'monthly' ? 'border-indigo-400 text-indigo-200 bg-indigo-400/10' : 'border-[#2a2a2a] text-zinc-400')}
+                  >
+                    Monthly
+                  </button>
+                  <button
+                    onClick={() => setBillingCycle('yearly')}
+                    className={cn('px-3 py-1.5 rounded-full text-xs border', billingCycle === 'yearly' ? 'border-indigo-400 text-indigo-200 bg-indigo-400/10' : 'border-[#2a2a2a] text-zinc-400')}
+                  >
+                    Yearly
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {[
+                    { id: 'plus', title: 'Plus', price: 20, desc: 'Unlock full experience' },
+                    { id: 'business', title: 'Business', price: 30, desc: 'Get more work done with AI for teams' },
+                    { id: 'pro', title: 'Pro', price: 200, desc: 'Maximize your productivity' }
+                  ].map((plan) => {
+                    const isCurrent = subscription?.plan === plan.id;
+                    const computedPrice = billingCycle === 'yearly' ? plan.price * 12 : plan.price;
+                    return (
+                      <div key={plan.id} className={cn('rounded-2xl border p-4', plan.id === 'business' ? 'border-indigo-500/60 bg-indigo-500/10' : 'border-[#2a2a2a] bg-[#151515]')}>
+                        <div className="text-xl text-zinc-100 mb-1">{plan.title}</div>
+                        <div className="text-4xl leading-none text-zinc-100 mb-1">GBP {computedPrice}</div>
+                        <div className="text-xs text-zinc-500 mb-4">{billingCycle === 'monthly' ? 'per month' : 'per year'}</div>
+                        <p className="text-sm text-zinc-400 mb-4">{plan.desc}</p>
+                        <button
+                          onClick={() => subscribeToPlan(plan.id as BillingSubscription['plan'])}
+                          disabled={billingBusy}
+                          className={cn(
+                            'w-full py-2 rounded-full text-sm border transition-colors disabled:opacity-50',
+                            isCurrent
+                              ? 'border-[#3a3a3a] text-zinc-400 bg-transparent'
+                              : plan.id === 'business'
+                                ? 'border-indigo-400 bg-indigo-500 text-white hover:bg-indigo-400'
+                                : 'border-zinc-200 bg-zinc-100 text-black hover:bg-white'
+                          )}
+                        >
+                          {isCurrent ? 'Current plan' : `Choose ${plan.title}`}
+                        </button>
+                        <ul className="mt-4 space-y-2 text-xs text-zinc-400">
+                          <li className="flex items-center gap-2"><Sparkles size={12} /> Solve complex problems</li>
+                          <li className="flex items-center gap-2"><Sparkles size={12} /> Long chats over multiple sessions</li>
+                          <li className="flex items-center gap-2"><Sparkles size={12} /> Agent-style workflows</li>
+                        </ul>
+                      </div>
+                    );
+                  })}
+                </div>
+              </motion.section>
             </>
           )}
         </AnimatePresence>

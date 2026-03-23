@@ -38,6 +38,33 @@ Cognira is a high-performance, private, and cost-free alternative to cloud-based
    npm run dev
    ```
 
+5. **Run full health check**:
+   ```bash
+   npm run health:full
+   ```
+
+## Environment Variables
+
+Use `.env` for local development. A committed `.env.example` template is included for deployment and CI setup.
+
+### Required/important keys
+
+- `NEXT_PUBLIC_API_URL`
+- `NEXT_PUBLIC_LOW_RESOURCE_MODE`
+- `NEXT_PUBLIC_DEFAULT_MODEL_LABEL`
+- `USE_LOCAL`
+- `DEFAULT_LOCAL_MODEL`
+- `ENABLE_CLOUD_MODELS`
+- `OLLAMA_URL`
+- `DEFAULT_MODEL`
+- `CHECKOUT_PROVIDER`
+- `STRIPE_SECRET_KEY` (only needed when using `CHECKOUT_PROVIDER=stripe`)
+- `HF_API_TOKEN` (optional)
+
+### Vercel redeploy
+
+When deploying to Vercel, copy the same keys from `.env.example` into Vercel Project Settings -> Environment Variables for each target environment (Preview/Production).
+
 ## Architecture
 
 - **Frontend**: Next.js 16 (React 19) + Tailwind CSS 4 + Framer Motion.
@@ -47,6 +74,57 @@ Cognira is a high-performance, private, and cost-free alternative to cloud-based
 ## Security & Privacy
 
 Cognira is designed with a "local-only" architecture. All inference, file processing, and data storage happen within your machine's boundary. There are no telemetry scripts or external API calls to third-party AI providers.
+
+## No-Paid-API Mode
+
+You can run Cognira in strict local mode with no paid AI APIs.
+
+### Current defaults
+
+- `USE_LOCAL=true`
+- `ENABLE_CLOUD_MODELS=false`
+- `DEFAULT_LOCAL_MODEL=llama3`
+- `NEXT_PUBLIC_DEFAULT_MODEL_LABEL=llama3 (Local)`
+
+This keeps the model selection and chat routing local-first and blocks cloud model options from the API model list.
+
+### How to run
+
+1. Start Ollama.
+2. Pull a local model:
+   ```bash
+   ollama pull llama3
+   ```
+3. Run Cognira:
+   ```bash
+   npm run dev
+   ```
+
+## Product Rollout Without Paid APIs
+
+Use this sequence to build full product behavior before paying for external providers.
+
+1. Services layer
+- Build feature modules as internal services first (auth/session, billing state, campaign state, automation runner, agent runner).
+- Keep each service behind an interface so providers can be swapped later.
+
+2. Subscriptions
+- Implement plans and entitlements locally in SQLite.
+- Track `plan`, `status`, and `usage_limits` as app data first.
+- Add real payment processors only after flows and limits are validated.
+
+3. Marketing
+- Use free/self-hosted tooling first (static landing pages, local analytics events, optional PostHog free tier).
+- Capture campaign and funnel events in your own DB before external ad attribution.
+
+4. Automation
+- Use local scheduled jobs and deterministic rules.
+- Keep triggers, actions, and run logs in SQLite so you can replay/debug without vendor lock-in.
+
+5. Agent mode
+- Start with tool-constrained local workflows (retrieve, summarize, transform).
+- Add guardrails (allowed actions, max steps, timeout, audit logs) before enabling broader autonomy.
+- Introduce paid model providers only when you need measured quality/latency gains.
 
 ---
 Created by NIGHTSHADE for Cognira.

@@ -1,6 +1,6 @@
-# Cognira: Local-First AI Intelligence System
+# Lumiora: Local-First AI Intelligence System
 
-Cognira is a high-performance, private, and cost-free alternative to cloud-based AI systems. It runs entirely on your local machine, ensuring complete data privacy and sub-second response times.
+Lumiora is a high-performance, private, and cost-free alternative to cloud-based AI systems. It runs entirely on your local machine, ensuring complete data privacy and sub-second response times.
 
 ## Key Features
 
@@ -33,7 +33,7 @@ Cognira is a high-performance, private, and cost-free alternative to cloud-based
    ```bash
    ollama pull llama3
    ```
-4. **Launch Cognira**:
+4. **Launch Lumiora**:
    ```bash
    npm run dev
    ```
@@ -97,11 +97,11 @@ In production, use your deployed backend URL and set `STRIPE_WEBHOOK_SECRET` fro
 
 ## Security & Privacy
 
-Cognira is designed with a "local-only" architecture. All inference, file processing, and data storage happen within your machine's boundary. There are no telemetry scripts or external API calls to third-party AI providers.
+Lumiora is designed with a "local-only" architecture. All inference, file processing, and data storage happen within your machine's boundary. There are no telemetry scripts or external API calls to third-party AI providers.
 
 ## No-Paid-API Mode
 
-You can run Cognira in strict local mode with no paid AI APIs.
+You can run Lumiora in strict local mode with no paid AI APIs.
 
 ### Current defaults
 
@@ -119,7 +119,7 @@ This keeps the model selection and chat routing local-first and blocks cloud mod
    ```bash
    ollama pull llama3
    ```
-3. Run Cognira:
+3. Run Lumiora:
    ```bash
    npm run dev
    ```
@@ -151,4 +151,4 @@ Use this sequence to build full product behavior before paying for external prov
 - Introduce paid model providers only when you need measured quality/latency gains.
 
 ---
-Created by NIGHTSHADE for Cognira.
+Created by NIGHTSHADE for Lumiora.

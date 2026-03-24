@@ -34,21 +34,21 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     handlers=[
-        logging.FileHandler("cognira_backend.log"),
+        logging.FileHandler("lumiora_backend.log"),
         logging.StreamHandler()
     ]
 )
-logger = logging.getLogger("Cognira")
+logger = logging.getLogger("Lumiora")
 
 load_dotenv()
 
-app = FastAPI(title="Cognira API", version="1.0.0")
+app = FastAPI(title="Lumiora API", version="1.0.0")
 
 
 @app.get("/")
 async def root():
     return {
-        "service": "Cognira API",
+        "service": "Lumiora API",
         "status": "running",
         "health": "/health",
         "models": "/models",
@@ -56,7 +56,7 @@ async def root():
     }
 
 # Database Setup
-DB_PATH = "cognira.db"
+DB_PATH = "lumiora.db"
 
 SUPPORTED_CLOUD_MODELS = [
     {"name": "free (Cloud)", "provider": "huggingface"},
@@ -913,7 +913,7 @@ FREE_MODEL_CANDIDATES = [
 def _build_free_prompt(messages: List[Message]) -> str:
     # Keep a compact prompt to improve latency for free providers.
     prompt_parts = [
-        "You are Cognira. Give direct, practical, and concise answers.",
+        "You are Lumiora. Give direct, practical, and concise answers.",
         "If the user asks for translation, return the translated phrase first."
     ]
 
@@ -1319,7 +1319,7 @@ async def chat(request: ChatRequest):
         if "developer" in request.session_id.lower() or "dev" in requested_model.lower():
             payload["messages"].insert(0, {
                 "role": "system", 
-                "content": "You are Cognira, a high-performance AI in Developer Mode. Provide extremely detailed, technical, and accurate responses. Break down complex logic and provide raw reasoning where possible."
+                "content": "You are Lumiora, a high-performance AI in Developer Mode. Provide extremely detailed, technical, and accurate responses. Break down complex logic and provide raw reasoning where possible."
             })
             
         url = "https://text.pollinations.ai/"
@@ -1353,7 +1353,7 @@ async def chat(request: ChatRequest):
                         if not any(m.get("role") == "system" for m in payload.get("messages", [])):
                             payload["messages"].insert(0, {
                                 "role": "system",
-                                "content": "You are Cognira. Give a direct, accurate answer first. Avoid unnecessary verbosity."
+                                "content": "You are Lumiora. Give a direct, accurate answer first. Avoid unnecessary verbosity."
                             })
                     else:
                         yield f"data: {json.dumps({'status': 'Contacting cloud model...', 'phase': 'cloud'})}\n\n"
@@ -1495,7 +1495,7 @@ async def chat(request: ChatRequest):
                 return
 
             degraded_reply = (
-                "Cognira is running in degraded mode because external AI providers are temporarily unavailable.\n\n"
+                "Lumiora is running in degraded mode because external AI providers are temporarily unavailable.\n\n"
                 f"Reason: {error_message}\n\n"
                 "Your message was received. Please retry in a moment, or install/start a local model runtime for reliable local responses."
             )

@@ -20,7 +20,7 @@ function Check-Endpoint {
   }
 }
 
-Write-Host "Running Cognira full health check..." -ForegroundColor Cyan
+Write-Host "Running Lumiora full health check..." -ForegroundColor Cyan
 
 # Frontend + backend basic routes
 Check-Endpoint -Name 'Frontend root' -Url 'http://localhost:3000' | Out-Null

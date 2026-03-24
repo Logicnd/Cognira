@@ -48,7 +48,7 @@ async def benchmark_prompt(prompt: str, model: str = "llama3"):
     }
 
 async def run_benchmarks():
-    print(f"--- Running Benchmarks for Cognira ---")
+    print(f"--- Running Benchmarks for Lumiora ---")
     results = []
     for prompt in PROMPTS:
         print(f"Benchmarking: {prompt[:50]}...")

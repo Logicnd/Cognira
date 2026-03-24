@@ -1,7 +1,7 @@
-# Cognira Diagnostic Analysis & Troubleshooting Report
+# Lumiora Diagnostic Analysis & Troubleshooting Report
 
 ## 1. Project State Analysis
-As of 2026-03-22, Cognira is in a **Hybrid-Functional** state. The core architecture (Next.js + FastAPI + SQLite) is stable, but external cloud dependencies are causing friction.
+As of 2026-03-22, Lumiora is in a **Hybrid-Functional** state. The core architecture (Next.js + FastAPI + SQLite) is stable, but external cloud dependencies are causing friction.
 
 ### Attempted Approaches
 - **Cloud-First MVP**: Used Pollinations AI for zero-key inference.

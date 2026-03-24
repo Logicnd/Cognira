@@ -1,0 +1,1025 @@
+﻿LUMIORA DEPLOYMENT TUTORIAL - CLEAN STEP BY STEP VERSION
+Version: 6.0
+Date: 2026-03-23
+Goal: easy to follow, complete, practical, and not oversized
+
+====================================================================
+SECTION 1 - QUICK START
+====================================================================
+1) Install Node.js 18+ and Python 3.10+.
+2) Run npm install in repository root.
+3) Create virtual environment and install api/requirements.txt.
+4) Copy .env.example to .env.
+5) Set NEXT_PUBLIC_API_URL=http://localhost:8000.
+6) Set CHECKOUT_PROVIDER=mock for first pass.
+7) Run npm run dev.
+8) Open / and /admin/billing and verify both pages load.
+9) Run npm run health:full.
+10) Run npm run predeploy:check.
+
+====================================================================
+SECTION 2 - WHAT TO DEPLOY
+====================================================================
+1) Frontend: Next.js app on Vercel.
+2) Backend: FastAPI app from api/main.py.
+3) Billing routes:
+   - GET /billing/subscription
+   - GET /billing/entitlements
+   - GET /billing/audit
+   - GET /billing/provider
+   - POST /billing/subscribe
+   - POST /billing/cancel
+   - POST /billing/webhook/stripe
+4) Entitlements enforced in POST /chat.
+
+====================================================================
+SECTION 3 - BACKEND DEPLOYMENT STEPS
+====================================================================
+B-01) Choose host platform and create backend service.
+B-02) Set HOST=0.0.0.0 and platform PORT.
+B-03) Set CHECKOUT_PROVIDER=mock for smoke deploy.
+B-04) Deploy backend and verify /health returns 200.
+B-05) Verify /billing/provider shows provider mode.
+B-06) Verify /billing/subscription and /billing/entitlements return valid JSON.
+B-07) Verify /billing/audit returns list.
+B-08) Run a chat request and verify success.
+B-09) Check backend logs for errors.
+B-10) Capture backend production URL for frontend config.
+
+====================================================================
+SECTION 4 - FRONTEND DEPLOYMENT STEPS
+====================================================================
+F-01) Connect repository to Vercel.
+F-02) Set NEXT_PUBLIC_API_URL to backend URL.
+F-03) Set NEXT_PUBLIC_LOW_RESOURCE_MODE and NEXT_PUBLIC_DEFAULT_MODEL_LABEL.
+F-04) Deploy preview and validate / and /admin/billing.
+F-05) Promote to production after preview passes.
+F-06) Ensure no secrets in NEXT_PUBLIC variables.
+
+====================================================================
+SECTION 5 - STRIPE PAYWALL SETUP
+====================================================================
+S-01) Create products and prices for Plus, Business, Pro monthly/yearly.
+S-02) Copy all STRIPE_PRICE_ID_* values to backend env.
+S-03) Set CHECKOUT_PROVIDER=stripe.
+S-04) Set STRIPE_SECRET_KEY.
+S-05) Set FRONTEND_BASE_URL, STRIPE_SUCCESS_URL, STRIPE_CANCEL_URL.
+S-06) Create webhook endpoint for /billing/webhook/stripe.
+S-07) Subscribe events: checkout.session.completed, customer.subscription.updated, customer.subscription.deleted.
+S-08) Set STRIPE_WEBHOOK_SECRET from Stripe.
+S-09) Redeploy backend.
+S-10) Verify /billing/provider shows stripe configured flags true.
+
+====================================================================
+SECTION 6 - PAYWALL TESTS (EASY CHECKLIST)
+====================================================================
+TEST BLOCK 1
+T-01-01) Plan change redirects to Stripe checkout in stripe mode.
+T-01-02) Checkout complete updates subscription state.
+T-01-03) Webhook delivery succeeds and signature is valid.
+T-01-04) Audit logs include checkout and subscription events.
+T-01-05) Plus plan blocks disallowed cloud models.
+T-01-06) Business/Pro plan allow expected model access.
+T-01-07) Usage counter increases after each chat request.
+T-01-08) Limit reached returns 429.
+T-01-09) Inactive subscription returns 402.
+T-01-10) Disallowed model returns 403.
+T-01-11) Cancel subscription updates status and behavior.
+T-01-12) Record pass/fail and notes.
+
+TEST BLOCK 2
+T-02-01) Plan change redirects to Stripe checkout in stripe mode.
+T-02-02) Checkout complete updates subscription state.
+T-02-03) Webhook delivery succeeds and signature is valid.
+T-02-04) Audit logs include checkout and subscription events.
+T-02-05) Plus plan blocks disallowed cloud models.
+T-02-06) Business/Pro plan allow expected model access.
+T-02-07) Usage counter increases after each chat request.
+T-02-08) Limit reached returns 429.
+T-02-09) Inactive subscription returns 402.
+T-02-10) Disallowed model returns 403.
+T-02-11) Cancel subscription updates status and behavior.
+T-02-12) Record pass/fail and notes.
+
+TEST BLOCK 3
+T-03-01) Plan change redirects to Stripe checkout in stripe mode.
+T-03-02) Checkout complete updates subscription state.
+T-03-03) Webhook delivery succeeds and signature is valid.
+T-03-04) Audit logs include checkout and subscription events.
+T-03-05) Plus plan blocks disallowed cloud models.
+T-03-06) Business/Pro plan allow expected model access.
+T-03-07) Usage counter increases after each chat request.
+T-03-08) Limit reached returns 429.
+T-03-09) Inactive subscription returns 402.
+T-03-10) Disallowed model returns 403.
+T-03-11) Cancel subscription updates status and behavior.
+T-03-12) Record pass/fail and notes.
+
+TEST BLOCK 4
+T-04-01) Plan change redirects to Stripe checkout in stripe mode.
+T-04-02) Checkout complete updates subscription state.
+T-04-03) Webhook delivery succeeds and signature is valid.
+T-04-04) Audit logs include checkout and subscription events.
+T-04-05) Plus plan blocks disallowed cloud models.
+T-04-06) Business/Pro plan allow expected model access.
+T-04-07) Usage counter increases after each chat request.
+T-04-08) Limit reached returns 429.
+T-04-09) Inactive subscription returns 402.
+T-04-10) Disallowed model returns 403.
+T-04-11) Cancel subscription updates status and behavior.
+T-04-12) Record pass/fail and notes.
+
+TEST BLOCK 5
+T-05-01) Plan change redirects to Stripe checkout in stripe mode.
+T-05-02) Checkout complete updates subscription state.
+T-05-03) Webhook delivery succeeds and signature is valid.
+T-05-04) Audit logs include checkout and subscription events.
+T-05-05) Plus plan blocks disallowed cloud models.
+T-05-06) Business/Pro plan allow expected model access.
+T-05-07) Usage counter increases after each chat request.
+T-05-08) Limit reached returns 429.
+T-05-09) Inactive subscription returns 402.
+T-05-10) Disallowed model returns 403.
+T-05-11) Cancel subscription updates status and behavior.
+T-05-12) Record pass/fail and notes.
+
+TEST BLOCK 6
+T-06-01) Plan change redirects to Stripe checkout in stripe mode.
+T-06-02) Checkout complete updates subscription state.
+T-06-03) Webhook delivery succeeds and signature is valid.
+T-06-04) Audit logs include checkout and subscription events.
+T-06-05) Plus plan blocks disallowed cloud models.
+T-06-06) Business/Pro plan allow expected model access.
+T-06-07) Usage counter increases after each chat request.
+T-06-08) Limit reached returns 429.
+T-06-09) Inactive subscription returns 402.
+T-06-10) Disallowed model returns 403.
+T-06-11) Cancel subscription updates status and behavior.
+T-06-12) Record pass/fail and notes.
+
+TEST BLOCK 7
+T-07-01) Plan change redirects to Stripe checkout in stripe mode.
+T-07-02) Checkout complete updates subscription state.
+T-07-03) Webhook delivery succeeds and signature is valid.
+T-07-04) Audit logs include checkout and subscription events.
+T-07-05) Plus plan blocks disallowed cloud models.
+T-07-06) Business/Pro plan allow expected model access.
+T-07-07) Usage counter increases after each chat request.
+T-07-08) Limit reached returns 429.
+T-07-09) Inactive subscription returns 402.
+T-07-10) Disallowed model returns 403.
+T-07-11) Cancel subscription updates status and behavior.
+T-07-12) Record pass/fail and notes.
+
+TEST BLOCK 8
+T-08-01) Plan change redirects to Stripe checkout in stripe mode.
+T-08-02) Checkout complete updates subscription state.
+T-08-03) Webhook delivery succeeds and signature is valid.
+T-08-04) Audit logs include checkout and subscription events.
+T-08-05) Plus plan blocks disallowed cloud models.
+T-08-06) Business/Pro plan allow expected model access.
+T-08-07) Usage counter increases after each chat request.
+T-08-08) Limit reached returns 429.
+T-08-09) Inactive subscription returns 402.
+T-08-10) Disallowed model returns 403.
+T-08-11) Cancel subscription updates status and behavior.
+T-08-12) Record pass/fail and notes.
+
+TEST BLOCK 9
+T-09-01) Plan change redirects to Stripe checkout in stripe mode.
+T-09-02) Checkout complete updates subscription state.
+T-09-03) Webhook delivery succeeds and signature is valid.
+T-09-04) Audit logs include checkout and subscription events.
+T-09-05) Plus plan blocks disallowed cloud models.
+T-09-06) Business/Pro plan allow expected model access.
+T-09-07) Usage counter increases after each chat request.
+T-09-08) Limit reached returns 429.
+T-09-09) Inactive subscription returns 402.
+T-09-10) Disallowed model returns 403.
+T-09-11) Cancel subscription updates status and behavior.
+T-09-12) Record pass/fail and notes.
+
+TEST BLOCK 10
+T-10-01) Plan change redirects to Stripe checkout in stripe mode.
+T-10-02) Checkout complete updates subscription state.
+T-10-03) Webhook delivery succeeds and signature is valid.
+T-10-04) Audit logs include checkout and subscription events.
+T-10-05) Plus plan blocks disallowed cloud models.
+T-10-06) Business/Pro plan allow expected model access.
+T-10-07) Usage counter increases after each chat request.
+T-10-08) Limit reached returns 429.
+T-10-09) Inactive subscription returns 402.
+T-10-10) Disallowed model returns 403.
+T-10-11) Cancel subscription updates status and behavior.
+T-10-12) Record pass/fail and notes.
+
+TEST BLOCK 11
+T-11-01) Plan change redirects to Stripe checkout in stripe mode.
+T-11-02) Checkout complete updates subscription state.
+T-11-03) Webhook delivery succeeds and signature is valid.
+T-11-04) Audit logs include checkout and subscription events.
+T-11-05) Plus plan blocks disallowed cloud models.
+T-11-06) Business/Pro plan allow expected model access.
+T-11-07) Usage counter increases after each chat request.
+T-11-08) Limit reached returns 429.
+T-11-09) Inactive subscription returns 402.
+T-11-10) Disallowed model returns 403.
+T-11-11) Cancel subscription updates status and behavior.
+T-11-12) Record pass/fail and notes.
+
+TEST BLOCK 12
+T-12-01) Plan change redirects to Stripe checkout in stripe mode.
+T-12-02) Checkout complete updates subscription state.
+T-12-03) Webhook delivery succeeds and signature is valid.
+T-12-04) Audit logs include checkout and subscription events.
+T-12-05) Plus plan blocks disallowed cloud models.
+T-12-06) Business/Pro plan allow expected model access.
+T-12-07) Usage counter increases after each chat request.
+T-12-08) Limit reached returns 429.
+T-12-09) Inactive subscription returns 402.
+T-12-10) Disallowed model returns 403.
+T-12-11) Cancel subscription updates status and behavior.
+T-12-12) Record pass/fail and notes.
+
+TEST BLOCK 13
+T-13-01) Plan change redirects to Stripe checkout in stripe mode.
+T-13-02) Checkout complete updates subscription state.
+T-13-03) Webhook delivery succeeds and signature is valid.
+T-13-04) Audit logs include checkout and subscription events.
+T-13-05) Plus plan blocks disallowed cloud models.
+T-13-06) Business/Pro plan allow expected model access.
+T-13-07) Usage counter increases after each chat request.
+T-13-08) Limit reached returns 429.
+T-13-09) Inactive subscription returns 402.
+T-13-10) Disallowed model returns 403.
+T-13-11) Cancel subscription updates status and behavior.
+T-13-12) Record pass/fail and notes.
+
+TEST BLOCK 14
+T-14-01) Plan change redirects to Stripe checkout in stripe mode.
+T-14-02) Checkout complete updates subscription state.
+T-14-03) Webhook delivery succeeds and signature is valid.
+T-14-04) Audit logs include checkout and subscription events.
+T-14-05) Plus plan blocks disallowed cloud models.
+T-14-06) Business/Pro plan allow expected model access.
+T-14-07) Usage counter increases after each chat request.
+T-14-08) Limit reached returns 429.
+T-14-09) Inactive subscription returns 402.
+T-14-10) Disallowed model returns 403.
+T-14-11) Cancel subscription updates status and behavior.
+T-14-12) Record pass/fail and notes.
+
+TEST BLOCK 15
+T-15-01) Plan change redirects to Stripe checkout in stripe mode.
+T-15-02) Checkout complete updates subscription state.
+T-15-03) Webhook delivery succeeds and signature is valid.
+T-15-04) Audit logs include checkout and subscription events.
+T-15-05) Plus plan blocks disallowed cloud models.
+T-15-06) Business/Pro plan allow expected model access.
+T-15-07) Usage counter increases after each chat request.
+T-15-08) Limit reached returns 429.
+T-15-09) Inactive subscription returns 402.
+T-15-10) Disallowed model returns 403.
+T-15-11) Cancel subscription updates status and behavior.
+T-15-12) Record pass/fail and notes.
+
+TEST BLOCK 16
+T-16-01) Plan change redirects to Stripe checkout in stripe mode.
+T-16-02) Checkout complete updates subscription state.
+T-16-03) Webhook delivery succeeds and signature is valid.
+T-16-04) Audit logs include checkout and subscription events.
+T-16-05) Plus plan blocks disallowed cloud models.
+T-16-06) Business/Pro plan allow expected model access.
+T-16-07) Usage counter increases after each chat request.
+T-16-08) Limit reached returns 429.
+T-16-09) Inactive subscription returns 402.
+T-16-10) Disallowed model returns 403.
+T-16-11) Cancel subscription updates status and behavior.
+T-16-12) Record pass/fail and notes.
+
+TEST BLOCK 17
+T-17-01) Plan change redirects to Stripe checkout in stripe mode.
+T-17-02) Checkout complete updates subscription state.
+T-17-03) Webhook delivery succeeds and signature is valid.
+T-17-04) Audit logs include checkout and subscription events.
+T-17-05) Plus plan blocks disallowed cloud models.
+T-17-06) Business/Pro plan allow expected model access.
+T-17-07) Usage counter increases after each chat request.
+T-17-08) Limit reached returns 429.
+T-17-09) Inactive subscription returns 402.
+T-17-10) Disallowed model returns 403.
+T-17-11) Cancel subscription updates status and behavior.
+T-17-12) Record pass/fail and notes.
+
+TEST BLOCK 18
+T-18-01) Plan change redirects to Stripe checkout in stripe mode.
+T-18-02) Checkout complete updates subscription state.
+T-18-03) Webhook delivery succeeds and signature is valid.
+T-18-04) Audit logs include checkout and subscription events.
+T-18-05) Plus plan blocks disallowed cloud models.
+T-18-06) Business/Pro plan allow expected model access.
+T-18-07) Usage counter increases after each chat request.
+T-18-08) Limit reached returns 429.
+T-18-09) Inactive subscription returns 402.
+T-18-10) Disallowed model returns 403.
+T-18-11) Cancel subscription updates status and behavior.
+T-18-12) Record pass/fail and notes.
+
+TEST BLOCK 19
+T-19-01) Plan change redirects to Stripe checkout in stripe mode.
+T-19-02) Checkout complete updates subscription state.
+T-19-03) Webhook delivery succeeds and signature is valid.
+T-19-04) Audit logs include checkout and subscription events.
+T-19-05) Plus plan blocks disallowed cloud models.
+T-19-06) Business/Pro plan allow expected model access.
+T-19-07) Usage counter increases after each chat request.
+T-19-08) Limit reached returns 429.
+T-19-09) Inactive subscription returns 402.
+T-19-10) Disallowed model returns 403.
+T-19-11) Cancel subscription updates status and behavior.
+T-19-12) Record pass/fail and notes.
+
+TEST BLOCK 20
+T-20-01) Plan change redirects to Stripe checkout in stripe mode.
+T-20-02) Checkout complete updates subscription state.
+T-20-03) Webhook delivery succeeds and signature is valid.
+T-20-04) Audit logs include checkout and subscription events.
+T-20-05) Plus plan blocks disallowed cloud models.
+T-20-06) Business/Pro plan allow expected model access.
+T-20-07) Usage counter increases after each chat request.
+T-20-08) Limit reached returns 429.
+T-20-09) Inactive subscription returns 402.
+T-20-10) Disallowed model returns 403.
+T-20-11) Cancel subscription updates status and behavior.
+T-20-12) Record pass/fail and notes.
+
+TEST BLOCK 21
+T-21-01) Plan change redirects to Stripe checkout in stripe mode.
+T-21-02) Checkout complete updates subscription state.
+T-21-03) Webhook delivery succeeds and signature is valid.
+T-21-04) Audit logs include checkout and subscription events.
+T-21-05) Plus plan blocks disallowed cloud models.
+T-21-06) Business/Pro plan allow expected model access.
+T-21-07) Usage counter increases after each chat request.
+T-21-08) Limit reached returns 429.
+T-21-09) Inactive subscription returns 402.
+T-21-10) Disallowed model returns 403.
+T-21-11) Cancel subscription updates status and behavior.
+T-21-12) Record pass/fail and notes.
+
+TEST BLOCK 22
+T-22-01) Plan change redirects to Stripe checkout in stripe mode.
+T-22-02) Checkout complete updates subscription state.
+T-22-03) Webhook delivery succeeds and signature is valid.
+T-22-04) Audit logs include checkout and subscription events.
+T-22-05) Plus plan blocks disallowed cloud models.
+T-22-06) Business/Pro plan allow expected model access.
+T-22-07) Usage counter increases after each chat request.
+T-22-08) Limit reached returns 429.
+T-22-09) Inactive subscription returns 402.
+T-22-10) Disallowed model returns 403.
+T-22-11) Cancel subscription updates status and behavior.
+T-22-12) Record pass/fail and notes.
+
+====================================================================
+SECTION 7 - AUTOMATION RELEASE GATES
+====================================================================
+RELEASE CYCLE 1
+R-01-01) Gate: predeploy check passes
+R-01-02) Gate: lint passes
+R-01-03) Gate: build passes
+R-01-04) Gate: backend /health passes
+R-01-05) Gate: billing provider endpoint returns expected mode
+R-01-06) Gate: billing entitlements endpoint valid
+R-01-07) Gate: billing audit endpoint valid
+R-01-08) Gate: billing page loads
+R-01-09) Gate: subscribe flow works
+R-01-10) Gate: webhook processing works
+R-01-11) Gate: rollback target documented
+R-01-12) Approve release only when all gates are green.
+
+RELEASE CYCLE 2
+R-02-01) Gate: predeploy check passes
+R-02-02) Gate: lint passes
+R-02-03) Gate: build passes
+R-02-04) Gate: backend /health passes
+R-02-05) Gate: billing provider endpoint returns expected mode
+R-02-06) Gate: billing entitlements endpoint valid
+R-02-07) Gate: billing audit endpoint valid
+R-02-08) Gate: billing page loads
+R-02-09) Gate: subscribe flow works
+R-02-10) Gate: webhook processing works
+R-02-11) Gate: rollback target documented
+R-02-12) Approve release only when all gates are green.
+
+RELEASE CYCLE 3
+R-03-01) Gate: predeploy check passes
+R-03-02) Gate: lint passes
+R-03-03) Gate: build passes
+R-03-04) Gate: backend /health passes
+R-03-05) Gate: billing provider endpoint returns expected mode
+R-03-06) Gate: billing entitlements endpoint valid
+R-03-07) Gate: billing audit endpoint valid
+R-03-08) Gate: billing page loads
+R-03-09) Gate: subscribe flow works
+R-03-10) Gate: webhook processing works
+R-03-11) Gate: rollback target documented
+R-03-12) Approve release only when all gates are green.
+
+RELEASE CYCLE 4
+R-04-01) Gate: predeploy check passes
+R-04-02) Gate: lint passes
+R-04-03) Gate: build passes
+R-04-04) Gate: backend /health passes
+R-04-05) Gate: billing provider endpoint returns expected mode
+R-04-06) Gate: billing entitlements endpoint valid
+R-04-07) Gate: billing audit endpoint valid
+R-04-08) Gate: billing page loads
+R-04-09) Gate: subscribe flow works
+R-04-10) Gate: webhook processing works
+R-04-11) Gate: rollback target documented
+R-04-12) Approve release only when all gates are green.
+
+RELEASE CYCLE 5
+R-05-01) Gate: predeploy check passes
+R-05-02) Gate: lint passes
+R-05-03) Gate: build passes
+R-05-04) Gate: backend /health passes
+R-05-05) Gate: billing provider endpoint returns expected mode
+R-05-06) Gate: billing entitlements endpoint valid
+R-05-07) Gate: billing audit endpoint valid
+R-05-08) Gate: billing page loads
+R-05-09) Gate: subscribe flow works
+R-05-10) Gate: webhook processing works
+R-05-11) Gate: rollback target documented
+R-05-12) Approve release only when all gates are green.
+
+RELEASE CYCLE 6
+R-06-01) Gate: predeploy check passes
+R-06-02) Gate: lint passes
+R-06-03) Gate: build passes
+R-06-04) Gate: backend /health passes
+R-06-05) Gate: billing provider endpoint returns expected mode
+R-06-06) Gate: billing entitlements endpoint valid
+R-06-07) Gate: billing audit endpoint valid
+R-06-08) Gate: billing page loads
+R-06-09) Gate: subscribe flow works
+R-06-10) Gate: webhook processing works
+R-06-11) Gate: rollback target documented
+R-06-12) Approve release only when all gates are green.
+
+RELEASE CYCLE 7
+R-07-01) Gate: predeploy check passes
+R-07-02) Gate: lint passes
+R-07-03) Gate: build passes
+R-07-04) Gate: backend /health passes
+R-07-05) Gate: billing provider endpoint returns expected mode
+R-07-06) Gate: billing entitlements endpoint valid
+R-07-07) Gate: billing audit endpoint valid
+R-07-08) Gate: billing page loads
+R-07-09) Gate: subscribe flow works
+R-07-10) Gate: webhook processing works
+R-07-11) Gate: rollback target documented
+R-07-12) Approve release only when all gates are green.
+
+RELEASE CYCLE 8
+R-08-01) Gate: predeploy check passes
+R-08-02) Gate: lint passes
+R-08-03) Gate: build passes
+R-08-04) Gate: backend /health passes
+R-08-05) Gate: billing provider endpoint returns expected mode
+R-08-06) Gate: billing entitlements endpoint valid
+R-08-07) Gate: billing audit endpoint valid
+R-08-08) Gate: billing page loads
+R-08-09) Gate: subscribe flow works
+R-08-10) Gate: webhook processing works
+R-08-11) Gate: rollback target documented
+R-08-12) Approve release only when all gates are green.
+
+RELEASE CYCLE 9
+R-09-01) Gate: predeploy check passes
+R-09-02) Gate: lint passes
+R-09-03) Gate: build passes
+R-09-04) Gate: backend /health passes
+R-09-05) Gate: billing provider endpoint returns expected mode
+R-09-06) Gate: billing entitlements endpoint valid
+R-09-07) Gate: billing audit endpoint valid
+R-09-08) Gate: billing page loads
+R-09-09) Gate: subscribe flow works
+R-09-10) Gate: webhook processing works
+R-09-11) Gate: rollback target documented
+R-09-12) Approve release only when all gates are green.
+
+RELEASE CYCLE 10
+R-10-01) Gate: predeploy check passes
+R-10-02) Gate: lint passes
+R-10-03) Gate: build passes
+R-10-04) Gate: backend /health passes
+R-10-05) Gate: billing provider endpoint returns expected mode
+R-10-06) Gate: billing entitlements endpoint valid
+R-10-07) Gate: billing audit endpoint valid
+R-10-08) Gate: billing page loads
+R-10-09) Gate: subscribe flow works
+R-10-10) Gate: webhook processing works
+R-10-11) Gate: rollback target documented
+R-10-12) Approve release only when all gates are green.
+
+RELEASE CYCLE 11
+R-11-01) Gate: predeploy check passes
+R-11-02) Gate: lint passes
+R-11-03) Gate: build passes
+R-11-04) Gate: backend /health passes
+R-11-05) Gate: billing provider endpoint returns expected mode
+R-11-06) Gate: billing entitlements endpoint valid
+R-11-07) Gate: billing audit endpoint valid
+R-11-08) Gate: billing page loads
+R-11-09) Gate: subscribe flow works
+R-11-10) Gate: webhook processing works
+R-11-11) Gate: rollback target documented
+R-11-12) Approve release only when all gates are green.
+
+RELEASE CYCLE 12
+R-12-01) Gate: predeploy check passes
+R-12-02) Gate: lint passes
+R-12-03) Gate: build passes
+R-12-04) Gate: backend /health passes
+R-12-05) Gate: billing provider endpoint returns expected mode
+R-12-06) Gate: billing entitlements endpoint valid
+R-12-07) Gate: billing audit endpoint valid
+R-12-08) Gate: billing page loads
+R-12-09) Gate: subscribe flow works
+R-12-10) Gate: webhook processing works
+R-12-11) Gate: rollback target documented
+R-12-12) Approve release only when all gates are green.
+
+RELEASE CYCLE 13
+R-13-01) Gate: predeploy check passes
+R-13-02) Gate: lint passes
+R-13-03) Gate: build passes
+R-13-04) Gate: backend /health passes
+R-13-05) Gate: billing provider endpoint returns expected mode
+R-13-06) Gate: billing entitlements endpoint valid
+R-13-07) Gate: billing audit endpoint valid
+R-13-08) Gate: billing page loads
+R-13-09) Gate: subscribe flow works
+R-13-10) Gate: webhook processing works
+R-13-11) Gate: rollback target documented
+R-13-12) Approve release only when all gates are green.
+
+RELEASE CYCLE 14
+R-14-01) Gate: predeploy check passes
+R-14-02) Gate: lint passes
+R-14-03) Gate: build passes
+R-14-04) Gate: backend /health passes
+R-14-05) Gate: billing provider endpoint returns expected mode
+R-14-06) Gate: billing entitlements endpoint valid
+R-14-07) Gate: billing audit endpoint valid
+R-14-08) Gate: billing page loads
+R-14-09) Gate: subscribe flow works
+R-14-10) Gate: webhook processing works
+R-14-11) Gate: rollback target documented
+R-14-12) Approve release only when all gates are green.
+
+RELEASE CYCLE 15
+R-15-01) Gate: predeploy check passes
+R-15-02) Gate: lint passes
+R-15-03) Gate: build passes
+R-15-04) Gate: backend /health passes
+R-15-05) Gate: billing provider endpoint returns expected mode
+R-15-06) Gate: billing entitlements endpoint valid
+R-15-07) Gate: billing audit endpoint valid
+R-15-08) Gate: billing page loads
+R-15-09) Gate: subscribe flow works
+R-15-10) Gate: webhook processing works
+R-15-11) Gate: rollback target documented
+R-15-12) Approve release only when all gates are green.
+
+====================================================================
+SECTION 8 - INCIDENT RESPONSE QUICK STEPS
+====================================================================
+INCIDENT 1
+I-001-1) Check impact and affected users.
+I-001-2) Verify /health and billing endpoints.
+I-001-3) Verify Stripe webhook status.
+I-001-4) Review backend logs.
+I-001-5) Apply safe fix and re-test paywall flow.
+I-001-6) Record root cause and follow-up task.
+
+INCIDENT 2
+I-002-1) Check impact and affected users.
+I-002-2) Verify /health and billing endpoints.
+I-002-3) Verify Stripe webhook status.
+I-002-4) Review backend logs.
+I-002-5) Apply safe fix and re-test paywall flow.
+I-002-6) Record root cause and follow-up task.
+
+INCIDENT 3
+I-003-1) Check impact and affected users.
+I-003-2) Verify /health and billing endpoints.
+I-003-3) Verify Stripe webhook status.
+I-003-4) Review backend logs.
+I-003-5) Apply safe fix and re-test paywall flow.
+I-003-6) Record root cause and follow-up task.
+
+INCIDENT 4
+I-004-1) Check impact and affected users.
+I-004-2) Verify /health and billing endpoints.
+I-004-3) Verify Stripe webhook status.
+I-004-4) Review backend logs.
+I-004-5) Apply safe fix and re-test paywall flow.
+I-004-6) Record root cause and follow-up task.
+
+INCIDENT 5
+I-005-1) Check impact and affected users.
+I-005-2) Verify /health and billing endpoints.
+I-005-3) Verify Stripe webhook status.
+I-005-4) Review backend logs.
+I-005-5) Apply safe fix and re-test paywall flow.
+I-005-6) Record root cause and follow-up task.
+
+INCIDENT 6
+I-006-1) Check impact and affected users.
+I-006-2) Verify /health and billing endpoints.
+I-006-3) Verify Stripe webhook status.
+I-006-4) Review backend logs.
+I-006-5) Apply safe fix and re-test paywall flow.
+I-006-6) Record root cause and follow-up task.
+
+INCIDENT 7
+I-007-1) Check impact and affected users.
+I-007-2) Verify /health and billing endpoints.
+I-007-3) Verify Stripe webhook status.
+I-007-4) Review backend logs.
+I-007-5) Apply safe fix and re-test paywall flow.
+I-007-6) Record root cause and follow-up task.
+
+INCIDENT 8
+I-008-1) Check impact and affected users.
+I-008-2) Verify /health and billing endpoints.
+I-008-3) Verify Stripe webhook status.
+I-008-4) Review backend logs.
+I-008-5) Apply safe fix and re-test paywall flow.
+I-008-6) Record root cause and follow-up task.
+
+INCIDENT 9
+I-009-1) Check impact and affected users.
+I-009-2) Verify /health and billing endpoints.
+I-009-3) Verify Stripe webhook status.
+I-009-4) Review backend logs.
+I-009-5) Apply safe fix and re-test paywall flow.
+I-009-6) Record root cause and follow-up task.
+
+INCIDENT 10
+I-010-1) Check impact and affected users.
+I-010-2) Verify /health and billing endpoints.
+I-010-3) Verify Stripe webhook status.
+I-010-4) Review backend logs.
+I-010-5) Apply safe fix and re-test paywall flow.
+I-010-6) Record root cause and follow-up task.
+
+INCIDENT 11
+I-011-1) Check impact and affected users.
+I-011-2) Verify /health and billing endpoints.
+I-011-3) Verify Stripe webhook status.
+I-011-4) Review backend logs.
+I-011-5) Apply safe fix and re-test paywall flow.
+I-011-6) Record root cause and follow-up task.
+
+INCIDENT 12
+I-012-1) Check impact and affected users.
+I-012-2) Verify /health and billing endpoints.
+I-012-3) Verify Stripe webhook status.
+I-012-4) Review backend logs.
+I-012-5) Apply safe fix and re-test paywall flow.
+I-012-6) Record root cause and follow-up task.
+
+INCIDENT 13
+I-013-1) Check impact and affected users.
+I-013-2) Verify /health and billing endpoints.
+I-013-3) Verify Stripe webhook status.
+I-013-4) Review backend logs.
+I-013-5) Apply safe fix and re-test paywall flow.
+I-013-6) Record root cause and follow-up task.
+
+INCIDENT 14
+I-014-1) Check impact and affected users.
+I-014-2) Verify /health and billing endpoints.
+I-014-3) Verify Stripe webhook status.
+I-014-4) Review backend logs.
+I-014-5) Apply safe fix and re-test paywall flow.
+I-014-6) Record root cause and follow-up task.
+
+INCIDENT 15
+I-015-1) Check impact and affected users.
+I-015-2) Verify /health and billing endpoints.
+I-015-3) Verify Stripe webhook status.
+I-015-4) Review backend logs.
+I-015-5) Apply safe fix and re-test paywall flow.
+I-015-6) Record root cause and follow-up task.
+
+INCIDENT 16
+I-016-1) Check impact and affected users.
+I-016-2) Verify /health and billing endpoints.
+I-016-3) Verify Stripe webhook status.
+I-016-4) Review backend logs.
+I-016-5) Apply safe fix and re-test paywall flow.
+I-016-6) Record root cause and follow-up task.
+
+INCIDENT 17
+I-017-1) Check impact and affected users.
+I-017-2) Verify /health and billing endpoints.
+I-017-3) Verify Stripe webhook status.
+I-017-4) Review backend logs.
+I-017-5) Apply safe fix and re-test paywall flow.
+I-017-6) Record root cause and follow-up task.
+
+INCIDENT 18
+I-018-1) Check impact and affected users.
+I-018-2) Verify /health and billing endpoints.
+I-018-3) Verify Stripe webhook status.
+I-018-4) Review backend logs.
+I-018-5) Apply safe fix and re-test paywall flow.
+I-018-6) Record root cause and follow-up task.
+
+INCIDENT 19
+I-019-1) Check impact and affected users.
+I-019-2) Verify /health and billing endpoints.
+I-019-3) Verify Stripe webhook status.
+I-019-4) Review backend logs.
+I-019-5) Apply safe fix and re-test paywall flow.
+I-019-6) Record root cause and follow-up task.
+
+INCIDENT 20
+I-020-1) Check impact and affected users.
+I-020-2) Verify /health and billing endpoints.
+I-020-3) Verify Stripe webhook status.
+I-020-4) Review backend logs.
+I-020-5) Apply safe fix and re-test paywall flow.
+I-020-6) Record root cause and follow-up task.
+
+INCIDENT 21
+I-021-1) Check impact and affected users.
+I-021-2) Verify /health and billing endpoints.
+I-021-3) Verify Stripe webhook status.
+I-021-4) Review backend logs.
+I-021-5) Apply safe fix and re-test paywall flow.
+I-021-6) Record root cause and follow-up task.
+
+INCIDENT 22
+I-022-1) Check impact and affected users.
+I-022-2) Verify /health and billing endpoints.
+I-022-3) Verify Stripe webhook status.
+I-022-4) Review backend logs.
+I-022-5) Apply safe fix and re-test paywall flow.
+I-022-6) Record root cause and follow-up task.
+
+INCIDENT 23
+I-023-1) Check impact and affected users.
+I-023-2) Verify /health and billing endpoints.
+I-023-3) Verify Stripe webhook status.
+I-023-4) Review backend logs.
+I-023-5) Apply safe fix and re-test paywall flow.
+I-023-6) Record root cause and follow-up task.
+
+INCIDENT 24
+I-024-1) Check impact and affected users.
+I-024-2) Verify /health and billing endpoints.
+I-024-3) Verify Stripe webhook status.
+I-024-4) Review backend logs.
+I-024-5) Apply safe fix and re-test paywall flow.
+I-024-6) Record root cause and follow-up task.
+
+INCIDENT 25
+I-025-1) Check impact and affected users.
+I-025-2) Verify /health and billing endpoints.
+I-025-3) Verify Stripe webhook status.
+I-025-4) Review backend logs.
+I-025-5) Apply safe fix and re-test paywall flow.
+I-025-6) Record root cause and follow-up task.
+
+====================================================================
+SECTION 9 - DAILY OPS CHECKLIST
+====================================================================
+DAY 1
+O-001-1) Check frontend uptime.
+O-001-2) Check backend /health.
+O-001-3) Check /billing/provider.
+O-001-4) Review /billing/audit.
+O-001-5) Review entitlement block trends.
+O-001-6) Review Stripe webhook delivery success.
+
+DAY 2
+O-002-1) Check frontend uptime.
+O-002-2) Check backend /health.
+O-002-3) Check /billing/provider.
+O-002-4) Review /billing/audit.
+O-002-5) Review entitlement block trends.
+O-002-6) Review Stripe webhook delivery success.
+
+DAY 3
+O-003-1) Check frontend uptime.
+O-003-2) Check backend /health.
+O-003-3) Check /billing/provider.
+O-003-4) Review /billing/audit.
+O-003-5) Review entitlement block trends.
+O-003-6) Review Stripe webhook delivery success.
+
+DAY 4
+O-004-1) Check frontend uptime.
+O-004-2) Check backend /health.
+O-004-3) Check /billing/provider.
+O-004-4) Review /billing/audit.
+O-004-5) Review entitlement block trends.
+O-004-6) Review Stripe webhook delivery success.
+
+DAY 5
+O-005-1) Check frontend uptime.
+O-005-2) Check backend /health.
+O-005-3) Check /billing/provider.
+O-005-4) Review /billing/audit.
+O-005-5) Review entitlement block trends.
+O-005-6) Review Stripe webhook delivery success.
+
+DAY 6
+O-006-1) Check frontend uptime.
+O-006-2) Check backend /health.
+O-006-3) Check /billing/provider.
+O-006-4) Review /billing/audit.
+O-006-5) Review entitlement block trends.
+O-006-6) Review Stripe webhook delivery success.
+
+DAY 7
+O-007-1) Check frontend uptime.
+O-007-2) Check backend /health.
+O-007-3) Check /billing/provider.
+O-007-4) Review /billing/audit.
+O-007-5) Review entitlement block trends.
+O-007-6) Review Stripe webhook delivery success.
+
+DAY 8
+O-008-1) Check frontend uptime.
+O-008-2) Check backend /health.
+O-008-3) Check /billing/provider.
+O-008-4) Review /billing/audit.
+O-008-5) Review entitlement block trends.
+O-008-6) Review Stripe webhook delivery success.
+
+DAY 9
+O-009-1) Check frontend uptime.
+O-009-2) Check backend /health.
+O-009-3) Check /billing/provider.
+O-009-4) Review /billing/audit.
+O-009-5) Review entitlement block trends.
+O-009-6) Review Stripe webhook delivery success.
+
+DAY 10
+O-010-1) Check frontend uptime.
+O-010-2) Check backend /health.
+O-010-3) Check /billing/provider.
+O-010-4) Review /billing/audit.
+O-010-5) Review entitlement block trends.
+O-010-6) Review Stripe webhook delivery success.
+
+DAY 11
+O-011-1) Check frontend uptime.
+O-011-2) Check backend /health.
+O-011-3) Check /billing/provider.
+O-011-4) Review /billing/audit.
+O-011-5) Review entitlement block trends.
+O-011-6) Review Stripe webhook delivery success.
+
+DAY 12
+O-012-1) Check frontend uptime.
+O-012-2) Check backend /health.
+O-012-3) Check /billing/provider.
+O-012-4) Review /billing/audit.
+O-012-5) Review entitlement block trends.
+O-012-6) Review Stripe webhook delivery success.
+
+DAY 13
+O-013-1) Check frontend uptime.
+O-013-2) Check backend /health.
+O-013-3) Check /billing/provider.
+O-013-4) Review /billing/audit.
+O-013-5) Review entitlement block trends.
+O-013-6) Review Stripe webhook delivery success.
+
+DAY 14
+O-014-1) Check frontend uptime.
+O-014-2) Check backend /health.
+O-014-3) Check /billing/provider.
+O-014-4) Review /billing/audit.
+O-014-5) Review entitlement block trends.
+O-014-6) Review Stripe webhook delivery success.
+
+DAY 15
+O-015-1) Check frontend uptime.
+O-015-2) Check backend /health.
+O-015-3) Check /billing/provider.
+O-015-4) Review /billing/audit.
+O-015-5) Review entitlement block trends.
+O-015-6) Review Stripe webhook delivery success.
+
+DAY 16
+O-016-1) Check frontend uptime.
+O-016-2) Check backend /health.
+O-016-3) Check /billing/provider.
+O-016-4) Review /billing/audit.
+O-016-5) Review entitlement block trends.
+O-016-6) Review Stripe webhook delivery success.
+
+DAY 17
+O-017-1) Check frontend uptime.
+O-017-2) Check backend /health.
+O-017-3) Check /billing/provider.
+O-017-4) Review /billing/audit.
+O-017-5) Review entitlement block trends.
+O-017-6) Review Stripe webhook delivery success.
+
+DAY 18
+O-018-1) Check frontend uptime.
+O-018-2) Check backend /health.
+O-018-3) Check /billing/provider.
+O-018-4) Review /billing/audit.
+O-018-5) Review entitlement block trends.
+O-018-6) Review Stripe webhook delivery success.
+
+DAY 19
+O-019-1) Check frontend uptime.
+O-019-2) Check backend /health.
+O-019-3) Check /billing/provider.
+O-019-4) Review /billing/audit.
+O-019-5) Review entitlement block trends.
+O-019-6) Review Stripe webhook delivery success.
+
+DAY 20
+O-020-1) Check frontend uptime.
+O-020-2) Check backend /health.
+O-020-3) Check /billing/provider.
+O-020-4) Review /billing/audit.
+O-020-5) Review entitlement block trends.
+O-020-6) Review Stripe webhook delivery success.
+
+DAY 21
+O-021-1) Check frontend uptime.
+O-021-2) Check backend /health.
+O-021-3) Check /billing/provider.
+O-021-4) Review /billing/audit.
+O-021-5) Review entitlement block trends.
+O-021-6) Review Stripe webhook delivery success.
+
+DAY 22
+O-022-1) Check frontend uptime.
+O-022-2) Check backend /health.
+O-022-3) Check /billing/provider.
+O-022-4) Review /billing/audit.
+O-022-5) Review entitlement block trends.
+O-022-6) Review Stripe webhook delivery success.
+
+DAY 23
+O-023-1) Check frontend uptime.
+O-023-2) Check backend /health.
+O-023-3) Check /billing/provider.
+O-023-4) Review /billing/audit.
+O-023-5) Review entitlement block trends.
+O-023-6) Review Stripe webhook delivery success.
+
+DAY 24
+O-024-1) Check frontend uptime.
+O-024-2) Check backend /health.
+O-024-3) Check /billing/provider.
+O-024-4) Review /billing/audit.
+O-024-5) Review entitlement block trends.
+O-024-6) Review Stripe webhook delivery success.
+
+DAY 25
+O-025-1) Check frontend uptime.
+O-025-2) Check backend /health.
+O-025-3) Check /billing/provider.
+O-025-4) Review /billing/audit.
+O-025-5) Review entitlement block trends.
+O-025-6) Review Stripe webhook delivery success.
+
+====================================================================
+SECTION 10 - TROUBLESHOOTING
+====================================================================
+1) Checkout button fails: check /billing/provider and missing STRIPE_PRICE_ID_* values.
+2) Checkout success but no plan update: check webhook secret and Stripe delivery logs.
+3) User blocked unexpectedly: check /billing/entitlements and subscription status.
+4) Billing page errors: verify NEXT_PUBLIC_API_URL and backend availability.
+
+====================================================================
+SECTION 11 - COMMAND CHEAT SHEET
+====================================================================
+npm install
+npm run dev
+npm run health:full
+npm run predeploy:check
+npm run lint
+npm run build
+curl http://localhost:8000/health
+curl http://localhost:8000/billing/provider
+curl http://localhost:8000/billing/entitlements
+curl http://localhost:8000/billing/audit
+
+END OF TUTORIAL

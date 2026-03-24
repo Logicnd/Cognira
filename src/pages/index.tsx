@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, type CSSProperties } from 'react';
+﻿import React, { useState, useEffect, useRef, type CSSProperties } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
 import { 
@@ -260,7 +260,7 @@ const markdownComponents: Components = {
   }
 };
 
-export default function CogniraApp() {
+export default function LumioraApp() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -900,7 +900,7 @@ export default function CogniraApp() {
       }
 
       if (!response.body) {
-        throw new Error('No response body from Cognira backend.');
+        throw new Error('No response body from Lumiora backend.');
       }
 
       const reader = response.body.getReader();
@@ -996,7 +996,7 @@ export default function CogniraApp() {
       console.error('Streaming error', error);
       const errorMessage = error instanceof Error
         ? error.message
-        : 'Failed to connect to the Cognira backend. Make sure the local server is running.';
+        : 'Failed to connect to the Lumiora backend. Make sure the local server is running.';
 
       setMessages(prev => {
         const newMessages = [...prev];
@@ -1443,7 +1443,7 @@ export default function CogniraApp() {
   return (
     <div className="flex h-screen bg-[#212121] text-zinc-100 font-sans overflow-hidden">
       <Head>
-        <title>Cognira | Local AI Intelligence</title>
+        <title>Lumiora | Local AI Intelligence</title>
       </Head>
 
       {/* Developer Mode Banner */}
@@ -1482,7 +1482,7 @@ export default function CogniraApp() {
                 )}>
                   <Bot size={18} />
                 </div>
-                <h1 className="text-sm font-bold tracking-tight">Cognira</h1>
+                <h1 className="text-sm font-bold tracking-tight">Lumiora</h1>
               </div>
             </div>
 
@@ -1699,7 +1699,7 @@ export default function CogniraApp() {
             {!minimalUi && (
             <div className="hidden md:inline-flex items-center gap-2 px-2.5 py-1 rounded-full border border-[#252525] bg-[#0f0f10] text-[10px] uppercase tracking-widest text-zinc-500">
               <span>{personas.find((p) => p.id === selectedPersonaId)?.name || 'Balanced'}</span>
-              {activeModes.length > 0 && <span className="text-zinc-700">• {activeModes.join(' • ')}</span>}
+              {activeModes.length > 0 && <span className="text-zinc-700">ÔÇó {activeModes.join(' ÔÇó ')}</span>}
             </div>
             )}
             {isLoading && showTopThinkingBadge && (
@@ -1808,7 +1808,7 @@ export default function CogniraApp() {
                   )}>
                     {!minimalUi && (
                     <div className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest">
-                      {msg.role === 'assistant' ? 'Cognira Intelligence' : 'You'}
+                      {msg.role === 'assistant' ? 'Lumiora Intelligence' : 'You'}
                     </div>
                     )}
                     <div className={cn(
@@ -1858,7 +1858,7 @@ export default function CogniraApp() {
                             <div className="w-1.5 h-1.5 bg-[#ff7a00] rounded-full animate-bounce" />
                           </div>
                           {!hasReceivedContent && (
-                            <div className="text-[11px] text-zinc-500">Cognira is planning the best response path.</div>
+                            <div className="text-[11px] text-zinc-500">Lumiora is planning the best response path.</div>
                           )}
                         </div>
                       ) : null)}
@@ -2230,7 +2230,7 @@ export default function CogniraApp() {
                 ))}
                 {citations.slice(0, 1).map((citation, idx) => (
                   <span key={`${citation.filename}-${citation.chunk}-${idx}`} className="px-2 py-1 rounded-full text-[10px] bg-[#131313] border border-[#2a2a2a] text-zinc-400">
-                    Source: {citation.filename} · chunk {citation.chunk}
+                    Source: {citation.filename} ┬À chunk {citation.chunk}
                   </span>
                 ))}
               </div>
@@ -2329,7 +2329,7 @@ export default function CogniraApp() {
                     aria-label="Quick action search"
                     className="w-full bg-[#0d0d0e] border border-[#262626] rounded-xl px-4 py-3 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-[#ff7a00]/35"
                   />
-                  <div className="mt-2 text-[10px] text-zinc-500 uppercase tracking-widest">Quick Navigator · Ctrl/Cmd + K</div>
+                  <div className="mt-2 text-[10px] text-zinc-500 uppercase tracking-widest">Quick Navigator ┬À Ctrl/Cmd + K</div>
                 </div>
 
                 <div className="max-h-[52vh] overflow-y-auto p-2">
@@ -2544,7 +2544,7 @@ export default function CogniraApp() {
                               value={reusableSystemPrompt}
                               onChange={(e) => setReusableSystemPrompt(e.target.value)}
                               className="w-full min-h-[120px] bg-[#0f0f0f] border border-[#2a2a2a] rounded-lg p-3 text-sm text-zinc-200"
-                              placeholder="How should Cognira respond?"
+                              placeholder="How should Lumiora respond?"
                             />
                           </div>
                         </div>
@@ -2590,9 +2590,9 @@ export default function CogniraApp() {
                           <div className="rounded-xl border border-[#252525] bg-[#121212] p-4 space-y-2">
                             <div className="text-sm text-zinc-200 font-medium">Account</div>
                             <div className="text-sm text-zinc-400">Name: Local User</div>
-                            <div className="text-sm text-zinc-400">Email: local@cognira.dev</div>
+                            <div className="text-sm text-zinc-400">Email: local@lumiora.dev</div>
                             <div className="text-sm text-zinc-400">Plan: {subscription?.plan?.toUpperCase() || 'PLUS'} ({subscription?.status || 'active'})</div>
-                            <div className="text-sm text-zinc-400">Billing: {subscription?.billing_cycle || 'monthly'} · GBP {subscription?.amount_gbp ?? 20}</div>
+                            <div className="text-sm text-zinc-400">Billing: {subscription?.billing_cycle || 'monthly'} ┬À GBP {subscription?.amount_gbp ?? 20}</div>
                             <div className="pt-2 flex items-center gap-2">
                               <button
                                 onClick={() => setShowUpgradeModal(true)}
